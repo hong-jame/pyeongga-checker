@@ -95,8 +95,10 @@ textarea{width:100%;height:230px;font-family:Consolas,monospace;font-size:12.5px
   <div class="drop" id="drop">
     <b>여기에 hwpx 파일을 끌어다 놓으세요</b>
     <span>학년별 통합본, 과목별 개별 파일 모두 가능합니다 (여러 개 한꺼번에)</span>
-    <input type="file" id="file" accept=".hwpx" multiple hidden>
+    <span style="display:block;margin-top:6px">범교과 시수 배분표(xlsx)를 같이 넣으면 시수까지 대조합니다</span>
+    <input type="file" id="file" accept=".hwpx,.xlsx" multiple hidden>
   </div>
+  <div class="hint" id="xlsStat">범교과 시수 배분표(xlsx)를 함께 넣으면 <b>범교과 시수 점검</b>도 실행됩니다.</div>
   <div class="hint">
     한글 파일이 <code>.hwp</code>라면 한글에서 <b>다른 이름으로 저장 → 파일 형식을 한글 문서 (*.hwpx)</b>로 바꿔 저장한 뒤 넣어 주세요.
     hwp(바이너리)는 표 구조를 읽을 수 없어 검산이 되지 않습니다.
@@ -145,6 +147,127 @@ async function inflate(entry){
   const ds=new DecompressionStream('deflate-raw');
   const s=new Blob([entry.data]).stream().pipeThrough(ds);
   return new Uint8Array(await new Response(s).arrayBuffer());
+}
+
+/* ============================================================
+   1-2. 범교과 시수 배분표(xlsx) 읽기
+   ============================================================ */
+async function parseXlsx(buf){
+  const zip=await unzip(buf), dec=new TextDecoder('utf-8');
+  const xml=async n=>{
+    if(!zip[n]) throw new Error(`엑셀 내부 파일이 없습니다: ${n}`);
+    return new DOMParser().parseFromString(dec.decode(await inflate(zip[n])),'application/xml');
+  };
+  const ss=[];
+  if(zip['xl/sharedStrings.xml']){
+    const d=await xml('xl/sharedStrings.xml');
+    for(const si of d.getElementsByTagNameNS('*','si')){
+      let s=''; for(const t of si.getElementsByTagNameNS('*','t')) s+=t.textContent||'';
+      ss.push(s);
+    }
+  }
+  const wb=await xml('xl/workbook.xml'), rl=await xml('xl/_rels/workbook.xml.rels');
+  const relMap={};
+  for(const r of rl.getElementsByTagNameNS('*','Relationship')) relMap[r.getAttribute('Id')]=r.getAttribute('Target');
+  const sheet0=wb.getElementsByTagNameNS('*','sheet')[0];
+  const rid=sheet0&&(sheet0.getAttribute('r:id')||
+    sheet0.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id'));
+  const target=(relMap[rid]||'worksheets/sheet1.xml').replace(/^\//,'').replace(/^xl\//,'');
+  const sh=await xml('xl/'+target);
+  const cells={};
+  for(const c of sh.getElementsByTagNameNS('*','c')){
+    const ref=c.getAttribute('r'); if(!ref) continue;
+    let v=null;
+    const isEl=c.getElementsByTagNameNS('*','is')[0];
+    if(isEl){ v=''; for(const x of isEl.getElementsByTagNameNS('*','t')) v+=x.textContent||''; }
+    else { const vEl=c.getElementsByTagNameNS('*','v')[0]; if(vEl) v=vEl.textContent; }
+    if(v===null) continue;
+    if(c.getAttribute('t')==='s') v=ss[+v]||'';
+    const m=/^([A-Z]+)(\d+)$/.exec(ref); if(!m) continue;
+    let col=0; for(const ch of m[1]) col=col*26+ch.charCodeAt(0)-64;
+    cells[`${+m[2]},${col}`]=String(v).trim();
+  }
+  return cells;
+}
+
+// 배분표 → [{대상, 주제, 교과들, 내용, h1, h2}]
+function buildCrossPlan(cells){
+  const keys=Object.keys(cells);
+  if(!keys.length) throw new Error('엑셀에서 읽을 내용이 없습니다');
+  const get=(r,c)=>cells[`${r},${c}`]||'';
+  const maxr=Math.max(...keys.map(k=>+k.split(',')[0]));
+  const maxc=Math.max(...keys.map(k=>+k.split(',')[1]));
+  let hdr=-1;
+  for(let r=1;r<=Math.min(maxr,15)&&hdr<0;r++)
+    for(let c=1;c<=maxc;c++) if(get(r,c).includes('입력할')){ hdr=r; break; }
+  if(hdr<0) throw new Error("배분표에서 '평가계획에 입력할 내용' 열을 찾지 못했습니다");
+  const C={};
+  for(let c=1;c<=maxc;c++){
+    const v=get(hdr,c);
+    if(v.includes('대상')) C.target=c;
+    else if(v.replace(/\s/g,'')==='주제') C.topic=c;
+    else if(v.includes('교과명')) C.subj=c;
+    else if(v.includes('입력할')) C.content=c;
+    else if(v.includes('1학기')) C.h1=c;
+    else if(v.includes('2학기')) C.h2=c;
+  }
+  if(!C.content) throw new Error("'평가계획에 입력할 내용' 열을 찾지 못했습니다");
+  const cur={target:'',topic:'',subj:''}, rows=[];
+  for(let r=hdr+1;r<=maxr;r++){
+    for(const [k,ci] of [['target',C.target],['topic',C.topic],['subj',C.subj]]){
+      if(ci){ const v=get(r,ci); if(v) cur[k]=v; }
+    }
+    const content=get(r,C.content);
+    if(!content||/시수\s*합계/.test(content)) continue;
+    rows.push({target:cur.target, topic:cur.topic,
+               subjects:cur.subj.split(/[\/\n,]/).map(x=>x.trim()).filter(Boolean),
+               content, h1:num(get(r,C.h1)), h2:num(get(r,C.h2))});
+  }
+  if(!rows.length) throw new Error('배분표에서 유효한 행을 찾지 못했습니다');
+  return rows;
+}
+
+// 과목명 비교용 정규화
+const nrm=s=>(s||'').replace(/[\s·․．.,()\[\]\/·]/g,'');
+function crossSubjMatch(planName, entry){
+  if(entry.subjects.some(s=>/전교과|전\s*교과/.test(s))) return true;
+  const a=nrm(planName);
+  if(!a) return false;
+  return entry.subjects.some(s=>{
+    const b=nrm(s);
+    return b.length>=2 && (a===b || a.includes(b) || b.includes(a));
+  });
+}
+function crossTextMatch(raw, content){
+  const a=nrm(raw).replace(/\d+(시수|시간|차시)/g,'');
+  const b=nrm(content);
+  if(a.length<2||b.length<2) return false;
+  return a===b || (a.length>=3&&b.includes(a)) || (b.length>=3&&a.includes(b));
+}
+
+// 계획서의 교수학습 운영계획 표에서 괄호 표기와 시수를 뽑는다
+const RE_HOUR=/(\d+)\s*(?:시수|시간|차시)/;
+function extractCross(s){
+  const out=[];
+  for(const b of s.blocks){
+    if(b.type!=='tbl') continue;
+    const head=(b.tbl.filled[0]||[]).map(x=>x.replace(/\s/g,''));
+    if(!(head.some(h=>h.includes('단원명'))&&head.some(h=>h.includes('성취기준')))) continue;
+    for(let r=1;r<b.tbl.nr;r++){
+      const cells=b.tbl.rows[r]||[];
+      const rowText=cells.map(c=>c.text).join(' ');
+      for(const c of cells){
+        for(const m of c.text.matchAll(/\(([^()]{2,40})\)/g)){
+          const raw=m[1].trim();
+          if(!/[가-힣]{2,}/.test(raw)) continue;
+          const inParen=RE_HOUR.exec(raw), inCell=RE_HOUR.exec(c.text), inRow=RE_HOUR.exec(rowText);
+          const hit=inParen||inCell||inRow;
+          out.push({raw, hours:hit?+hit[1]:null, exact:!!inParen, row:r});
+        }
+      }
+    }
+  }
+  return out;
 }
 
 /* ============================================================
@@ -722,6 +845,51 @@ const RULES=[
    return {st:'pass',msg:`평가계획 성취기준이 모두 운영계획에 있습니다 (${evalCodes.size}개)`,det:det.join('\n')};
  }},
 
+{id:'cross',name:'범교과 학습 주제 시수',level:'error',
+ run(s){
+   if(!CROSS_PLAN) return {st:'skip',msg:'범교과 시수 배분표(xlsx)를 넣으면 점검합니다'};
+   const term=crossTerm(s);
+   const grade=(s.meta.grade||'').replace(/\s/g,'');
+   const req=CROSS_PLAN.filter(e=>{
+     const t=(e.target||'').replace(/\s/g,'');
+     const gradeOK=/전학년|전체/.test(t)||!t||(grade&&t.includes(grade.replace('학년','')+'학년'));
+     return gradeOK && crossSubjMatch(s.meta.name, e) && e[term]>0;
+   });
+   if(!req.length)
+     return {st:'skip',msg:`배분표에 ${s.meta.name} 배정 항목이 없습니다`};
+
+   const found=s.cross||[];
+   const used=new Set(), lines=[], short=[], miss=[], over=[];
+   for(const e of req){
+     const hits=found.filter((f,i)=>{
+       if(crossTextMatch(f.raw,e.content)){ used.add(i); return true; }
+       return false;
+     });
+     const noHour=hits.filter(h=>h.hours===null).length;
+     const sum=hits.reduce((a,b)=>a+(b.hours||0),0);
+     const need=e[term];
+     let mark;
+     if(!hits.length){ mark='누락'; miss.push(e.content); }
+     else if(noHour&&!sum){ mark=`시수 미표기(표기 ${hits.length}회)`; short.push(`${e.content}(시수 없음)`); }
+     else if(sum<need){ mark='부족'; short.push(`${e.content} ${sum}/${need}`); }
+     else if(sum>need){ mark='초과'; over.push(`${e.content} ${sum}/${need}`); }
+     else mark='충족';
+     lines.push(`${mark==='충족'?'○':'×'} ${e.content} — 기준 ${need}시수 / 계획 ${sum?sum+'시수':(hits.length?'시수 없음':'없음')}` +
+                (hits.length?`  [${hits.map(h=>h.raw).join(' · ')}]`:'') + `  → ${mark}`);
+   }
+   const extra=found.filter((f,i)=>!used.has(i)&&/교육|안전|인권|예방|성교육/.test(f.raw));
+   if(extra.length) lines.push('', '배분표에 없는 표기: '+[...new Set(extra.map(e=>e.raw))].join(' · '));
+
+   const termLabel=term==='h1'?'1학기':'2학기';
+   if(miss.length||short.length)
+     return {st:'fail',
+             msg:`${termLabel} 기준 ${req.length}개 중 누락 ${miss.length}개, 부족 ${short.length}개`,
+             det:lines.join('\n')};
+   if(over.length)
+     return {st:'fail',msg:`기준보다 많이 편성된 항목 ${over.length}개`,det:lines.join('\n')};
+   return {st:'pass',msg:`${termLabel} 배정 ${req.length}개 항목 모두 충족`,det:lines.join('\n')};
+ }},
+
 {id:'method',name:'평가 방법 표시',level:'warn',
  run(s){
    if(!/논술|구술|발표|토의|토론|프로젝트|실험|실습|포트폴리오/.test(s.text))
@@ -770,6 +938,7 @@ function review(subject){
   const rt=findRatioTable(subject);
   subject.ratio=rt?parseRatio(rt):null;
   subject.perfDetails=collectPerfDetails(subject);
+  subject.cross=extractCross(subject);
   subject.results=RULES.map(r=>{
     let res;
     try{ res=r.run(subject); }
@@ -783,7 +952,12 @@ function review(subject){
    7. 화면
    ============================================================ */
 const out=document.getElementById('out'), msg=document.getElementById('msg');
-let SUBJECTS=[];
+let SUBJECTS=[], CROSS_PLAN=null, CROSS_NAME='', CROSS_TERM='auto';
+// 어느 학기 편성시수를 기준으로 볼지
+function crossTerm(s){
+  if(CROSS_TERM==='h1'||CROSS_TERM==='h2') return CROSS_TERM;
+  return /1\s*학기/.test(s.meta.semester||'')?'h1':'h2';
+}
 
 function statusOf(r){
   if(r.st==='skip') return {cls:'ok',tag:'해당없음',t:'t-ok'};
@@ -817,6 +991,11 @@ function render(){
       <option value="warn">오류 또는 경고가 있는 과목만</option>
       <option value="unk">판정 불가가 있는 과목만</option>
     </select>
+    ${CROSS_PLAN?`<select id="term">
+      <option value="auto">범교과 기준: 계획서 학기 따름</option>
+      <option value="h1">범교과 기준: 1학기 편성시수</option>
+      <option value="h2">범교과 기준: 2학기 편성시수</option>
+    </select>`:''}
     <button onclick="openAll(true)">모두 펼치기</button>
     <button onclick="openAll(false)">모두 접기</button>
     <button onclick="copyReport()">수정 요청 문구 복사</button>
@@ -858,6 +1037,15 @@ function render(){
   }
   out.innerHTML=html;
   const f=document.getElementById('flt'); if(f){ f.value=filter; f.onchange=render; }
+  const t=document.getElementById('term');
+  if(t){ t.value=CROSS_TERM; t.onchange=()=>{ CROSS_TERM=t.value; SUBJECTS.forEach(rerunCross); render(); }; }
+}
+function rerunCross(s){
+  const i=s.results.findIndex(r=>r.rule.id==='cross');
+  if(i<0) return;
+  const rule=s.results[i].rule;
+  let res; try{ res=rule.run(s); }catch(e){ res={st:'unknown',msg:'검사 중 오류: '+e.message}; }
+  s.results[i]={rule,...res};
 }
 function count(s){
   let err=0,warn=0,unk=0;
@@ -891,7 +1079,20 @@ function copyReport(){
 async function handle(files){
   msg.textContent=''; out.innerHTML='<div class="empty">읽는 중…</div>';
   const subs=[];
+  // 엑셀(범교과 배분표) 먼저 처리
   for(const f of files){
+    if(!/\.xlsx$/i.test(f.name)) continue;
+    try{
+      CROSS_PLAN=buildCrossPlan(await parseXlsx(await f.arrayBuffer()));
+      CROSS_NAME=f.name;
+    }catch(e){
+      CROSS_PLAN=null; CROSS_NAME='';
+      msg.textContent=`배분표 읽기 실패 (${f.name}) : ${e.message}`;
+    }
+  }
+  const docs=[...files].filter(f=>!/\.xlsx$/i.test(f.name));
+  if(!docs.length && CROSS_PLAN){ crossStatus(); render(); return; }
+  for(const f of docs){
     if(!/\.hwpx$/i.test(f.name)){
       msg.textContent=`${f.name} 은 hwpx가 아닙니다. 한글에서 hwpx로 저장한 뒤 다시 넣어 주세요.`;
       continue;
@@ -914,7 +1115,21 @@ async function handle(files){
     }
   }
   SUBJECTS=subs;
+  crossStatus();
   render();
+}
+
+function crossStatus(){
+  const el=document.getElementById('xlsStat');
+  if(!el) return;
+  if(!CROSS_PLAN){
+    el.innerHTML='범교과 시수 배분표(xlsx)를 함께 넣으면 <b>범교과 시수 점검</b>도 실행됩니다.';
+    el.style.color='#8a93a5';
+    return;
+  }
+  const grades=[...new Set(CROSS_PLAN.map(e=>e.target).filter(Boolean))];
+  el.innerHTML=`배분표 <b>${esc(CROSS_NAME)}</b> — 배정 ${CROSS_PLAN.length}건 (${grades.join(', ')})`;
+  el.style.color='#1e7d5a';
 }
 
 const drop=document.getElementById('drop'), fin=document.getElementById('file');
