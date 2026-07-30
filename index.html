@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>평가계획 검토기</title>
+<style>
+:root{
+  --bg:#f4f6fa; --card:#fff; --ink:#1c2333; --sub:#5b6478; --line:#e2e6ef;
+  --brand:#1f4e8c; --brand-soft:#eaf1fb;
+  --err:#c0392b; --err-bg:#fdeceb; --warn:#b7791f; --warn-bg:#fdf5e6;
+  --ok:#1e7d5a; --ok-bg:#e8f6f0; --unk:#5f6b7a; --unk-bg:#eef1f5;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Malgun Gothic","맑은 고딕",-apple-system,BlinkMacSystemFont,sans-serif;
+  font-size:14px;line-height:1.6}
+header{background:var(--brand);color:#fff;padding:18px 24px}
+header h1{margin:0;font-size:19px;letter-spacing:-.3px}
+header p{margin:4px 0 0;font-size:12.5px;opacity:.85}
+.wrap{max-width:1240px;margin:0 auto;padding:20px 24px 60px}
+
+.drop{border:2px dashed #b9c4d6;border-radius:12px;background:#fff;padding:34px 20px;text-align:center;
+  transition:.15s;cursor:pointer}
+.drop.on{border-color:var(--brand);background:var(--brand-soft)}
+.drop b{display:block;font-size:16px;margin-bottom:6px}
+.drop span{color:var(--sub);font-size:12.5px}
+.hint{margin-top:10px;font-size:12px;color:var(--sub)}
+.hint code{background:#eef1f6;padding:1px 5px;border-radius:4px}
+
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:18px 0 14px}
+button{font-family:inherit;font-size:13px;border:1px solid var(--line);background:#fff;color:var(--ink);
+  padding:7px 13px;border-radius:7px;cursor:pointer}
+button:hover{background:#f0f3f8}
+button.pri{background:var(--brand);color:#fff;border-color:var(--brand)}
+button.pri:hover{filter:brightness(1.1)}
+select{font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff}
+
+.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px}
+.sum .box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.sum .n{font-size:26px;font-weight:700;line-height:1.15}
+.sum .l{font-size:12px;color:var(--sub);margin-top:2px}
+.n.err{color:var(--err)} .n.warn{color:var(--warn)} .n.ok{color:var(--ok)} .n.unk{color:var(--unk)}
+
+.subj{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden}
+.subj>.head{display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;user-select:none}
+.subj>.head:hover{background:#fafbfd}
+.subj .nm{font-weight:700;font-size:15px}
+.subj .meta{font-size:12px;color:var(--sub)}
+.subj .sp{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
+.b-err{background:var(--err-bg);color:var(--err)}
+.b-warn{background:var(--warn-bg);color:var(--warn)}
+.b-ok{background:var(--ok-bg);color:var(--ok)}
+.b-unk{background:var(--unk-bg);color:var(--unk)}
+.body{display:none;border-top:1px solid var(--line);padding:6px 16px 16px}
+.subj.open .body{display:block}
+
+.rule{padding:10px 0;border-bottom:1px dashed var(--line)}
+.rule:last-child{border-bottom:none}
+.rule .t{display:flex;gap:9px;align-items:flex-start}
+.tag{flex:none;font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;margin-top:2px}
+.t-err{background:var(--err-bg);color:var(--err)}
+.t-warn{background:var(--warn-bg);color:var(--warn)}
+.t-ok{background:var(--ok-bg);color:var(--ok)}
+.t-unk{background:var(--unk-bg);color:var(--unk)}
+.rule .nmr{font-weight:600}
+.rule .msg{color:var(--sub);font-size:13px;margin-top:2px}
+.rule .det{margin-top:6px;background:#f7f9fc;border:1px solid var(--line);border-radius:7px;padding:8px 10px;
+  font-size:12.5px;color:#3b4657;white-space:pre-wrap;word-break:break-all;max-height:230px;overflow:auto}
+.rule.pass{opacity:.6}
+
+.note{background:#fff;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:8px;
+  padding:12px 15px;margin:14px 0;font-size:13px}
+.note b{color:var(--brand)}
+#msg{margin-top:14px;font-size:13px;color:var(--err)}
+.empty{text-align:center;color:var(--sub);padding:40px 0;font-size:13.5px}
+textarea{width:100%;height:230px;font-family:Consolas,monospace;font-size:12.5px;border:1px solid var(--line);
+  border-radius:8px;padding:10px;margin-top:8px}
+@media print{
+  header,.drop,.bar,.hint,#msg{display:none}
+  .body{display:block !important}
+  .subj{break-inside:avoid;border:1px solid #ccc}
+  body{background:#fff}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>평가계획 검토기</h1>
+  <p>교과(목)별 평가계획서 hwpx 파일을 넣으면 형식 규칙과 수치 검산을 자동으로 점검합니다</p>
+</header>
+
+<div class="wrap">
+  <div class="drop" id="drop">
+    <b>여기에 hwpx 파일을 끌어다 놓으세요</b>
+    <span>학년별 통합본, 과목별 개별 파일 모두 가능합니다 (여러 개 한꺼번에)</span>
+    <input type="file" id="file" accept=".hwpx" multiple hidden>
+  </div>
+  <div class="hint">
+    한글 파일이 <code>.hwp</code>라면 한글에서 <b>다른 이름으로 저장 → 파일 형식을 한글 문서 (*.hwpx)</b>로 바꿔 저장한 뒤 넣어 주세요.
+    hwp(바이너리)는 표 구조를 읽을 수 없어 검산이 되지 않습니다.
+  </div>
+
+  <div id="msg"></div>
+  <div id="out"></div>
+</div>
+
+<script>
+/* ============================================================
+   1. ZIP 읽기 (외부 라이브러리 없이)
+   ============================================================ */
+async function unzip(buf){
+  const dv=new DataView(buf), u8=new Uint8Array(buf);
+  // End of Central Directory 찾기
+  let eocd=-1;
+  for(let i=u8.length-22;i>=0 && i>u8.length-66000;i--){
+    if(dv.getUint32(i,true)===0x06054b50){eocd=i;break;}
+  }
+  if(eocd<0) throw new Error('zip 구조를 찾지 못했습니다 (hwpx 파일이 맞는지 확인해 주세요)');
+  const count=dv.getUint16(eocd+10,true);
+  let off=dv.getUint32(eocd+16,true);
+  const files={};
+  for(let n=0;n<count;n++){
+    if(dv.getUint32(off,true)!==0x02014b50) break;
+    const method=dv.getUint16(off+10,true);
+    const csize=dv.getUint32(off+20,true);
+    const nlen=dv.getUint16(off+28,true);
+    const elen=dv.getUint16(off+30,true);
+    const clen=dv.getUint16(off+32,true);
+    const lho=dv.getUint32(off+42,true);
+    const name=new TextDecoder('utf-8').decode(u8.subarray(off+46,off+46+nlen));
+    // local header
+    const lnlen=dv.getUint16(lho+26,true), lelen=dv.getUint16(lho+28,true);
+    const start=lho+30+lnlen+lelen;
+    files[name]={method,data:u8.subarray(start,start+csize)};
+    off+=46+nlen+elen+clen;
+  }
+  return files;
+}
+async function inflate(entry){
+  if(entry.method===0) return entry.data;
+  if(typeof DecompressionStream==='undefined')
+    throw new Error('이 브라우저는 압축 해제를 지원하지 않습니다. 크롬이나 엣지 최신 버전에서 열어 주세요.');
+  const ds=new DecompressionStream('deflate-raw');
+  const s=new Blob([entry.data]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(s).arrayBuffer());
+}
+
+/* ============================================================
+   2. hwpx → 블록(문단 / 표) 변환
+   ============================================================ */
+const LN=el=>el.localName||(el.nodeName||'').split(':').pop();
+
+function descendants(el,name,stopAt){
+  const out=[];
+  (function rec(n){
+    for(const c of n.children){
+      const ln=LN(c);
+      if(stopAt && stopAt.includes(ln)){ if(ln===name) out.push(c); continue; }
+      if(ln===name) out.push(c);
+      rec(c);
+    }
+  })(el);
+  return out;
+}
+const isMemo=el=>LN(el)==='fieldBegin'&&el.getAttribute('type')==='MEMO';
+// 문서에 달린 메모(주석) 텍스트만 따로 모음
+function memosIn(el){
+  const out=[];
+  (function rec(n){
+    for(const c of n.children){
+      if(isMemo(c)){ const t=(c.textContent||'').replace(/\s+/g,' ').trim(); if(t) out.push(t); continue; }
+      rec(c);
+    }
+  })(el);
+  return out;
+}
+// 표 내부와 메모를 건너뛰고 본문 텍스트만 모음
+function textOf(el,skipTable){
+  let s='';
+  (function rec(n){
+    for(const c of n.childNodes){
+      if(c.nodeType!==1) continue;
+      const ln=LN(c);
+      if(isMemo(c)) continue;
+      if(skipTable && ln==='tbl') continue;
+      if(ln==='t'){ s+=(c.textContent||''); continue; }
+      if(ln==='tab'){ s+='\t'; continue; }
+      if(ln==='lineBreak'){ s+='\n'; continue; }
+      rec(c);
+      if(ln==='p') s+='\n';
+    }
+  })(el);
+  return s;
+}
+function cellText(tc){
+  return textOf(tc,false).replace(/\n{2,}/g,'\n').trim();
+}
+
+function parseTable(tbl){
+  const cells=[];
+  let maxR=0,maxC=0;
+  for(const tr of descendants(tbl,'tr',['tbl'])){
+    if(tr.closest && tr.closest('tbl')!==tbl){}
+    for(const tc of tr.children){
+      if(LN(tc)!=='tc') continue;
+      const addr=[...tc.children].find(x=>LN(x)==='cellAddr');
+      const span=[...tc.children].find(x=>LN(x)==='cellSpan');
+      const r=addr?+addr.getAttribute('rowAddr'):cells.length;
+      const c=addr?+addr.getAttribute('colAddr'):0;
+      const rs=span?+span.getAttribute('rowSpan')||1:1;
+      const cs=span?+span.getAttribute('colSpan')||1:1;
+      cells.push({r,c,rs,cs,text:cellText(tc)});
+      maxR=Math.max(maxR,r+rs); maxC=Math.max(maxC,c+cs);
+    }
+  }
+  const filled=Array.from({length:maxR},()=>Array(maxC).fill(''));
+  for(const cell of cells)
+    for(let i=cell.r;i<cell.r+cell.rs;i++)
+      for(let j=cell.c;j<cell.c+cell.cs;j++)
+        if(filled[i]) filled[i][j]=cell.text;
+  const rows=Array.from({length:maxR},()=>[]);
+  for(const cell of cells) if(rows[cell.r]) rows[cell.r].push(cell);
+  rows.forEach(r=>r.sort((a,b)=>a.c-b.c));
+  return {cells,rows,filled,nr:maxR,nc:maxC,memos:memosIn(tbl),
+          all:cells.map(c=>c.text).join(' ')};
+}
+
+function buildBlocks(doc){
+  const blocks=[];
+  // nested=true 인 블록은 바깥 표의 셀 안에 들어 있는 내용 (문서 전체가 표 하나에
+  // 담긴 파일이 있어 안쪽까지 들어가되, 본문 텍스트는 바깥 것만 세어 중복을 막는다)
+  (function walk(node,nested){
+    for(const ch of node.children){
+      const ln=LN(ch);
+      if(ln==='tbl'){
+        blocks.push({type:'tbl',tbl:parseTable(ch),nested});
+        for(const tr of descendants(ch,'tr',['tbl']))
+          for(const tc of tr.children) if(LN(tc)==='tc') walk(tc,true);
+        continue;
+      }
+      if(ln==='p'){
+        const t=textOf(ch,true).replace(/\n{2,}/g,'\n').trim();
+        if(t) blocks.push({type:'p',text:t,nested,memos:memosIn(ch)});
+        for(const tb of descendants(ch,'tbl',['tbl'])){
+          blocks.push({type:'tbl',tbl:parseTable(tb),nested});
+          for(const tr of descendants(tb,'tr',['tbl']))
+            for(const tc of tr.children) if(LN(tc)==='tc') walk(tc,true);
+        }
+        continue;
+      }
+      walk(ch,nested);
+    }
+  })(doc.documentElement,false);
+  return blocks;
+}
+
+/* ============================================================
+   3. 과목 분리
+   ============================================================ */
+const RE_HEAD=/^\s*\d{4}\s*학년도[^\n]{0,60}?교수\s*[·ㆍ‧∙\.]?\s*학습\s*및\s*평가\s*운영\s*계획\s*$/;
+function isHeadText(t){
+  const one=t.replace(/\s+/g,' ').trim();
+  return one.length<70 && RE_HEAD.test(one);
+}
+function splitSubjects(blocks,fileName){
+  const marks=[];
+  blocks.forEach((b,i)=>{
+    let t=null;
+    if(b.type==='p') t=b.text;
+    else if(b.type==='tbl' && b.tbl.cells.length<=2) t=b.tbl.cells.map(c=>c.text).join(' ');
+    if(t && isHeadText(t)) marks.push({i,title:t.replace(/\s+/g,' ').trim()});
+  });
+  // 문단 + 바로 뒤 표가 같은 제목이면 하나로
+  const uniq=[];
+  for(const m of marks){
+    const prev=uniq[uniq.length-1];
+    if(prev && m.i-prev.i<=3 && prev.title===m.title) continue;
+    uniq.push(m);
+  }
+  if(!uniq.length) return [{title:fileName,blocks,fileName}];
+  return uniq.map((m,k)=>({
+    title:m.title,
+    blocks:blocks.slice(m.i,k+1<uniq.length?uniq[k+1].i:blocks.length),
+    fileName
+  }));
+}
+
+function subjectMeta(s){
+  const meta={name:'',grade:'',semester:'',cls:''};
+  for(const b of s.blocks.slice(0,14)){
+    if(b.type!=='tbl') continue;
+    const f=b.tbl.filled;
+    if(!f.length||f.length<2) continue;
+    const head=f[0].map(x=>x.replace(/\s/g,''));
+    const gi=head.findIndex(x=>x==='과목'), yi=head.findIndex(x=>x==='학년');
+    if(gi>=0 && f[1] && f[1][gi]){
+      meta.name=f[1][gi].trim();
+      if(yi>=0 && f[1][yi]) meta.grade=f[1][yi].trim();
+      const si=head.findIndex(x=>x==='학기'); if(si>=0&&f[1][si]) meta.semester=f[1][si].trim();
+      const ci=head.findIndex(x=>x==='학급'); if(ci>=0&&f[1][ci]) meta.cls=f[1][ci].trim();
+      break;
+    }
+  }
+  if(!meta.name){
+    const m=s.title.match(/\d\s*학기\s*(.+?)\s*교수/);
+    meta.name=m?m[1].replace(/과$/,'').trim():s.title;
+  }
+  if(!meta.grade){
+    const m=s.title.match(/(\d)\s*학년/); if(m) meta.grade=m[1]+'학년';
+  }
+  return meta;
+}
+
+/* ============================================================
+   4. 반영비율 표 해석
+   ============================================================ */
+const num=t=>{const m=(t||'').match(/-?\d+(?:\.\d+)?/); return m?parseFloat(m[0]):null;};
+const pct=t=>{const m=(t||'').match(/(\d+(?:\.\d+)?)\s*%/); return m?parseFloat(m[1]):null;};
+const pctInParen=t=>{const m=(t||'').match(/\(\s*(\d+(?:\.\d+)?)\s*%\s*\)/); return m?parseFloat(m[1]):null;};
+const norm=t=>(t||'').replace(/[\s ·ㆍ‧,\.\(\)]/g,'');
+
+function findRatioTable(s){
+  for(const b of s.blocks){
+    if(b.type!=='tbl') continue;
+    const a=b.tbl.all.replace(/\s/g,'');
+    if(a.includes('반영비율') && a.includes('수행평가') &&
+       b.tbl.nr>=3 && b.tbl.nc>=2) return b.tbl;
+  }
+  return null;
+}
+function rowByLabel(tbl,...keys){
+  for(const k of keys)
+    for(let r=0;r<tbl.nr;r++){
+      const lab=(tbl.filled[r][0]||'').replace(/\s/g,'');
+      if(lab.includes(k)) return r;
+    }
+  return -1;
+}
+function parseRatio(tbl){
+  const R={ok:false,notes:[]};
+  // 유형 행: 정기시험 / 수행평가 셀의 열 범위 (정기시험이 없는 과목도 있음)
+  let typeRow=-1,jgCell=null,suCell=null;
+  for(let r=0;r<Math.min(tbl.nr,4);r++){
+    let jg=null,su=null;
+    for(const c of tbl.rows[r]||[]){
+      const t=c.text.replace(/\s/g,'');
+      if(t.length<=24&&/(정기시험|지필평가)/.test(t)) jg=c;
+      if(t.length<=24&&/수행평가/.test(t)) su=c;
+    }
+    if(su||jg){typeRow=r;jgCell=jg;suCell=su;break;}
+  }
+  if(typeRow<0||!suCell){R.notes.push('평가 유형 행(수행평가)을 찾지 못했습니다');return R;}
+  R.hasJG=!!jgCell;
+  if(jgCell) R.jgRange=[jgCell.c,jgCell.c+jgCell.cs-1];
+  R.suRange=[suCell.c,suCell.c+suCell.cs-1];
+  R.termLabel=jgCell?jgCell.text.replace(/\s/g,''):'(정기시험 없음)';
+
+  const rr=rowByLabel(tbl,'반영비율');
+  if(rr<0){R.notes.push('반영비율 행을 찾지 못했습니다');return R;}
+  R.jgRatio=jgCell?pct(tbl.filled[rr][R.jgRange[0]]):0;
+  R.suRatio=pct(tbl.filled[rr][R.suRange[0]]);
+  const last=tbl.filled[rr][tbl.nc-1];
+  R.totalRatio=pct(last);
+
+  // 영역 만점 행
+  const mr=rowByLabel(tbl,'영역만점','만점');
+  if(mr>=0){
+    R.areaCells=(tbl.rows[mr]||[]).filter(c=>c.c>0);
+    R.jgSum=0;R.suSum=0;R.jgHas=false;R.suHas=false;
+    R.areaScores=[];
+    for(const c of R.areaCells){
+      const p=pctInParen(c.text)!==null?pctInParen(c.text):null;
+      const sc=num(c.text);
+      const inJG=R.hasJG&&c.c>=R.jgRange[0]&&c.c<=R.jgRange[1];
+      const inSU=c.c>=R.suRange[0]&&c.c<=R.suRange[1];
+      if(p!==null){ if(inJG){R.jgSum+=p;R.jgHas=true;} if(inSU){R.suSum+=p;R.suHas=true;} }
+      if(inSU) R.areaScores.push({c:c.c,cs:c.cs,score:sc,pct:p,text:c.text});
+    }
+  }
+  // 영역명 행 ('횟수/영역', '시기/영역' 처럼 영역이 들어가고 만점이 아닌 행)
+  R.suAreas=[];
+  let nameRow=-1;
+  for(let r=0;r<tbl.nr;r++){
+    const lab=(tbl.filled[r][0]||'').replace(/\s/g,'');
+    if(lab.includes('영역')&&!lab.includes('만점')&&!lab.includes('비율')){nameRow=r;break;}
+  }
+  if(nameRow<0) nameRow=typeRow+1;
+  if(tbl.rows[nameRow]){
+    for(const c of tbl.rows[nameRow]){
+      if(c.c<R.suRange[0]||c.c>R.suRange[1]) continue;
+      const t=c.text.trim();
+      if(!t||t==='­'||t==='-') continue;
+      R.suAreas.push({name:t,range:[c.c,c.c+c.cs-1]});
+    }
+  }
+  if(R.areaScores) for(const a of R.suAreas){
+    a.score=R.areaScores.filter(x=>x.c>=a.range[0]&&x.c<=a.range[1])
+                        .reduce((s,x)=>s+(x.score||0),0);
+  }
+  // 논술형 행
+  const nr2=rowByLabel(tbl,'논술형');
+  if(nr2>=0){
+    const cs=(tbl.rows[nr2]||[]).filter(c=>c.c>0);
+    R.essayCells=cs;
+    const vals=cs.map(c=>pct(c.text)).filter(v=>v!==null);
+    R.essayStated=cs.length?pct(cs[cs.length-1].text):null;
+    R.essayParts=vals.slice(0,-1);
+    R.essaySum=R.essayParts.reduce((a,b)=>a+b,0);
+    R.essayJG=R.hasJG?cs.filter(c=>c.c>=R.jgRange[0]&&c.c<=R.jgRange[1])
+                .map(c=>pct(c.text)).filter(v=>v!==null):[];
+  }
+  // 평가 시기 행
+  const tr2=rowByLabel(tbl,'평가시기','시기');
+  if(tr2>=0) R.timeCells=(tbl.rows[tr2]||[]).filter(c=>c.c>0);
+  // 성취기준 행
+  const sr=rowByLabel(tbl,'성취기준');
+  if(sr>=0) R.stdCells=(tbl.rows[sr]||[]).filter(c=>c.c>0);
+  R.ok=true;
+  return R;
+}
+
+/* ============================================================
+   5. 검토 규칙
+   ============================================================ */
+const COMMON=['공통국어1','공통국어2','공통수학1','공통수학2','공통영어1','공통영어2',
+  '통합사회1','통합사회2','통합과학1','통합과학2','과학탐구실험1','과학탐구실험2','한국사1','한국사2'];
+// 2015 개정 [12언매01-01] 과 2022 개정 [10통과1-01-01] 두 형식을 모두 인식
+const RE_CODE=/(\d{1,2}[가-힣A-Za-z]{1,10}\d{0,2}(?:-\d{2}){1,2})/g;
+
+const RULES=[
+{id:'term',name:'평가 용어 (지필평가 → 정기시험)',level:'error',
+ run(s){
+   const hits=[...s.text.matchAll(/지필\s*평가/g)];
+   if(!hits.length) return {st:'pass',msg:'지필평가 표현이 없습니다'};
+   const ex=hits.slice(0,6).map(m=>'… '+s.text.slice(Math.max(0,m.index-40),m.index+40).replace(/\n/g,' ')+' …');
+   return {st:'fail',msg:`'지필평가' ${hits.length}회 발견. 2026학년도 양식은 '정기시험'으로 바뀌었습니다`,det:ex.join('\n')};
+ }},
+
+{id:'guide',name:'양식 안내 문구 삭제',level:'warn',
+ run(s){
+   const pats=[['<유의사항>',/<\s*유의사항\s*>/g],['※ 박스는',/※\s*박스는/g],
+               ['묶음 개체입니다',/묶음 개체입니다/g],['◯◯',/◯◯/g],
+               ['참고 링크',/edunet\.net/g]];
+   const found=pats.map(([n,re])=>[n,(s.text.match(re)||[]).length]).filter(x=>x[1]>0);
+   if(!found.length) return {st:'pass',msg:'안내용 문구가 남아 있지 않습니다'};
+   return {st:'fail',msg:'양식의 안내 문구가 남아 있습니다',
+           det:found.map(([n,c])=>`${n} : ${c}회`).join('\n')};
+ }},
+
+{id:'memo',name:'문서에 남은 메모',level:'warn',
+ run(s){
+   const ms=new Set();
+   for(const b of s.blocks) for(const m of (b.memos||b.tbl&&b.tbl.memos||[])) ms.add(m);
+   if(!ms.size) return {st:'pass',msg:'남아 있는 메모가 없습니다'};
+   return {st:'fail',msg:`메모 ${ms.size}개가 남아 있습니다. 결재 전에 삭제해야 합니다`,
+           det:[...ms].map(m=>'· '+m.slice(0,120)).join('\n')};
+ }},
+
+{id:'ratio100',name:'반영비율 합계 100%',level:'error',
+ run(s){
+   const R=s.ratio;
+   if(!R||!R.ok) return {st:'unknown',msg:'반영비율 표를 해석하지 못했습니다',det:(R&&R.notes.join('\n'))||''};
+   if(R.suRatio===null||(R.hasJG&&R.jgRatio===null))
+     return {st:'unknown',msg:'정기시험 또는 수행평가 반영비율 값을 읽지 못했습니다'};
+   const sum=R.jgRatio+R.suRatio;
+   const label=R.hasJG?`정기시험 ${R.jgRatio}% + 수행평가 ${R.suRatio}%`
+                      :`수행평가 ${R.suRatio}% (정기시험 없음)`;
+   if(Math.abs(sum-100)<0.01) return {st:'pass',msg:`${label} = 100%`};
+   return {st:'fail',msg:`${label} = ${sum}% (100%가 아닙니다)`};
+ }},
+
+{id:'areasum',name:'영역별 만점 비율과 반영비율 일치',level:'error',
+ run(s){
+   const R=s.ratio;
+   if(!R||!R.ok||R.jgSum===undefined) return {st:'unknown',msg:'영역 만점 행을 찾지 못했습니다'};
+   const out=[],bad=[];
+   if(R.jgHas){
+     const d=Math.abs(R.jgSum-(R.jgRatio||0));
+     out.push(`정기시험 영역 합 ${round(R.jgSum)}% / 반영비율 ${R.jgRatio}%`);
+     if(d>0.01) bad.push('정기시험');
+   }
+   if(R.suHas){
+     const d=Math.abs(R.suSum-(R.suRatio||0));
+     out.push(`수행평가 영역 합 ${round(R.suSum)}% / 반영비율 ${R.suRatio}%`);
+     if(d>0.01) bad.push('수행평가');
+   }
+   if(!R.jgHas&&!R.suHas) return {st:'unknown',msg:'영역 만점 칸에 비율(%) 표기가 없습니다'};
+   if(!bad.length) return {st:'pass',msg:out.join(' · ')};
+   return {st:'fail',msg:`${bad.join(', ')} 영역 만점 비율의 합이 반영비율과 다릅니다`,det:out.join('\n')};
+ }},
+
+{id:'perfscore',name:'수행평가 영역 만점 = 반영비율 점수',level:'warn',
+ run(s){
+   const R=s.ratio;
+   if(!R||!R.ok||!R.areaScores||!R.areaScores.length) return {st:'unknown',msg:'수행평가 영역 만점을 읽지 못했습니다'};
+   const bad=[],det=[];
+   for(const a of R.areaScores){
+     if(a.score===null||a.pct===null) continue;
+     det.push(`${a.text.replace(/\n/g,' ')} → 만점 ${a.score}점 / 비율 ${a.pct}%`);
+     if(Math.abs(a.score-a.pct)>0.01) bad.push(a.text.replace(/\n/g,' '));
+   }
+   if(!det.length) return {st:'unknown',msg:'만점과 비율을 함께 표기한 칸이 없습니다'};
+   if(!bad.length) return {st:'pass',msg:'수행평가 영역 만점이 반영비율과 같습니다'};
+   return {st:'fail',msg:'영역 만점과 반영비율이 다릅니다. 양식은 20% 영역이면 20점 만점을 권장합니다',det:det.join('\n')};
+ }},
+
+{id:'perfarea',name:'수행평가 영역 수와 세부기준 일치',level:'error',
+ run(s){
+   const R=s.ratio;
+   if(!R||!R.ok) return {st:'unknown',msg:'반영비율 표를 해석하지 못했습니다'};
+   const tableAreas=R.suAreas||[];
+   const detail=s.perfDetails;
+   if(!tableAreas.length&&!detail.length) return {st:'unknown',msg:'수행평가 영역을 찾지 못했습니다'};
+   const det=[];
+   det.push('반영비율 표: '+(tableAreas.map(a=>`${a.name}(${a.score||'?'}점)`).join(', ')||'없음'));
+   det.push('세부기준: '+(detail.map(d=>`${d.name}(${d.score===null?'?':d.score}점)`).join(', ')||'없음'));
+   if(!detail.length)
+     return {st:'fail',msg:'수행평가 영역별 세부 기준(채점기준)을 찾지 못했습니다',det:det.join('\n')};
+   const tSum=tableAreas.reduce((a,b)=>a+(b.score||0),0);
+   const dSum=detail.reduce((a,b)=>a+(b.score||0),0);
+   det.push(`만점 합계: 표 ${tSum}점 / 세부기준 ${dSum}점`);
+   if(tSum&&dSum&&Math.abs(tSum-dSum)>0.01)
+     return {st:'fail',msg:`수행평가 만점 합계가 다릅니다 (표 ${tSum}점 / 세부기준 ${dSum}점)`,det:det.join('\n')};
+   // 이름 단위 대조 (합계가 맞으면 세부 과제로 나눠 적은 것으로 봄)
+   const mism=[];
+   for(const a of tableAreas){
+     const hit=detail.find(d=>norm(d.name)===norm(a.name)||norm(d.name).includes(norm(a.name))||norm(a.name).includes(norm(d.name)));
+     if(hit&&hit.score!==null&&a.score&&Math.abs(hit.score-a.score)>0.01)
+       mism.push(`'${a.name}' 만점 불일치 (표 ${a.score}점 / 세부기준 ${hit.score}점)`);
+   }
+   if(mism.length) return {st:'fail',msg:'영역별 만점이 맞지 않습니다',det:det.concat('',mism).join('\n')};
+   if(tableAreas.length!==detail.length)
+     return {st:'pass',msg:`만점 합계는 맞습니다 (표 ${tableAreas.length}개 영역을 세부기준 ${detail.length}개로 나눠 작성)`,det:det.join('\n')};
+   return {st:'pass',msg:`${tableAreas.length}개 영역이 만점까지 일치합니다`,det:det.join('\n')};
+ }},
+
+{id:'essay',name:'논술형 반영비율 검산과 시기 편중',level:'warn',
+ run(s){
+   const R=s.ratio;
+   if(!R||!R.ok||R.essaySum===undefined) return {st:'unknown',msg:'논술형 반영비율 행을 찾지 못했습니다'};
+   const det=[`구성 값: ${R.essayParts.join('% + ')||'-'}% = ${round(R.essaySum)}%`,
+              `표기 합계: ${R.essayStated===null?'없음':R.essayStated+'%'}`];
+   if(R.essayJG&&R.essayJG.length>=2){
+     det.push(`정기시험 구간: ${R.essayJG.join('%, ')}%`);
+   }
+   if(R.essayStated!==null&&Math.abs(R.essaySum-R.essayStated)>0.01)
+     return {st:'fail',msg:'논술형 반영비율의 합과 표기된 합계가 다릅니다',det:det.join('\n')};
+   if(R.essayJG&&R.essayJG.length>=2){
+     const mx=Math.max(...R.essayJG),mn=Math.min(...R.essayJG);
+     if(mn===0&&mx>0)
+       return {st:'fail',msg:'논술형이 정기시험 한 차수에만 몰려 있습니다 (특정 시기 편중 지양)',det:det.join('\n')};
+   }
+   return {st:'pass',msg:`논술형 합계 ${round(R.essaySum)}%`,det:det.join('\n')};
+ }},
+
+{id:'time',name:'평가 시기 표기',level:'warn',
+ run(s){
+   const R=s.ratio;
+   if(!R||!R.ok||!R.timeCells) return {st:'unknown',msg:'평가 시기 행을 찾지 못했습니다'};
+   const empty=R.timeCells.filter(c=>{
+     const t=c.text.trim();
+     const inJG=R.hasJG&&c.c>=R.jgRange[0]&&c.c<=R.jgRange[1];
+     const inSU=c.c>=R.suRange[0]&&c.c<=R.suRange[1];
+     return (!t||t==='­'||t==='-')&&(inJG||inSU);
+   });
+   if(!empty.length) return {st:'pass',msg:'평가 시기가 모두 기재되어 있습니다'};
+   return {st:'fail',msg:`평가 시기가 비어 있는 칸이 ${empty.length}개 있습니다`};
+ }},
+
+{id:'grade5',name:'성취도 단계 표 (5단계와 3단계 중복)',level:'error',
+ run(s){
+   const t=s.text.replace(/\s/g,'');
+   const has5=/90%이상/.test(t)&&/40%이상~60%미만|60%미만/.test(t);
+   const has3=/80%이상~100%|80%이상~100/.test(t)&&/60%이상~80%미만/.test(t);
+   if(has5&&has3)
+     return {st:'fail',msg:'성취도 5단계 표와 3단계 표가 함께 남아 있습니다. 해당하는 하나만 작성합니다'};
+   if(!has5&&!has3) return {st:'unknown',msg:'기준 성취율 표를 찾지 못했습니다'};
+   return {st:'pass',msg:has5?'5단계 평정 표만 있습니다':'3단계 평정 표만 있습니다'};
+ }},
+
+{id:'cutscore',name:'분할점수 산출 방식 명시',level:'error',
+ run(s){
+   const t=s.text.replace(/\s/g,'');
+   const fixed=t.includes('고정분할점수'), est=t.includes('추정분할점수');
+   if(fixed&&est) return {st:'fail',msg:'고정분할점수와 추정분할점수가 함께 적혀 있습니다. 하나를 택해 명시해야 합니다'};
+   if(fixed) return {st:'pass',msg:'성취수준별 고정분할점수로 명시되어 있습니다'};
+   if(est) return {st:'pass',msg:'성취수준별 추정분할점수로 명시되어 있습니다'};
+   return {st:'fail',msg:'분할점수 산출 방식(고정 또는 추정)이 명시되지 않았습니다'};
+ }},
+
+{id:'ai',name:'AI 활용 기본 원칙 (2026 신설 필수)',level:'error',
+ run(s){
+   const t=s.text.replace(/\s/g,'');
+   const items=[
+     ['보조적 활용',/보조적으로활용/],
+     ['직접 관찰 평가',/직접학생의활동을관찰|독자적사고/],
+     ['금지 행위 사전 안내',/AI활용이금지되는행위|사전안내/]
+   ];
+   const miss=items.filter(([n,re])=>!re.test(t)).map(x=>x[0]);
+   if(!/AI|인공지능/.test(s.text))
+     return {st:'fail',msg:'AI 활용에 관한 내용이 전혀 없습니다. 2026학년도 양식의 필수 신설 항목입니다'};
+   if(!miss.length) return {st:'pass',msg:'기본 원칙 3항목이 모두 있습니다'};
+   return {st:'fail',msg:'기본 원칙 중 빠진 항목이 있습니다: '+miss.join(', ')};
+ }},
+
+{id:'affect',name:'정의적 능력 평가 방안',level:'error',
+ run(s){
+   if(/정의적\s*능력/.test(s.text)) return {st:'pass',msg:'정의적 능력 평가 항목이 있습니다'};
+   return {st:'fail',msg:'정의적 능력 평가 방안이 없습니다. 평가계획서에 반드시 포함해야 합니다'};
+ }},
+
+{id:'absent',name:'미응시자와 학적변동자 성적처리',level:'error',
+ run(s){
+   const t=s.text.replace(/\s/g,'');
+   const a=/미응시|결시/.test(t), b=/학적변동|전입|편입/.test(t);
+   if(a&&b) return {st:'pass',msg:'미응시자와 학적변동자 처리 기준이 있습니다'};
+   const miss=[]; if(!a)miss.push('미응시자(결시자)'); if(!b)miss.push('학적변동자');
+   return {st:'fail',msg:'성적처리 기준이 빠졌습니다: '+miss.join(', ')};
+ }},
+
+{id:'basepoint',name:'기본점수와 장기 미인정 결석자',level:'warn',
+ run(s){
+   const t=s.text.replace(/\s/g,'');
+   const a=t.includes('기본점수'), b=/장기미인정결석/.test(t);
+   if(a&&b) return {st:'pass',msg:'기본점수와 장기 미인정 결석자 기준이 있습니다'};
+   const miss=[]; if(!a)miss.push('기본점수'); if(!b)miss.push('장기 미인정 결석자');
+   return {st:'fail',msg:'수행평가 세부기준에서 빠진 항목: '+miss.join(', ')};
+ }},
+
+{id:'semlevel',name:'학기 단위 성취수준 (1·2학년)',level:'error',
+ run(s){
+   if(!/1학년|2학년/.test(s.meta.grade||'')) return {st:'skip',msg:'2015 개정 적용 학년은 해당하지 않습니다'};
+   if(/학기\s*단위\s*성취수준/.test(s.text)) return {st:'pass',msg:'학기 단위 성취수준 진술이 있습니다'};
+   return {st:'fail',msg:'학기 단위 성취수준 진술이 없습니다. 1·2학년은 반드시 포함해야 합니다'};
+ }},
+
+{id:'minlevel',name:'최소 성취수준 (공통과목)',level:'error',
+ run(s){
+   const nm=norm(s.meta.name);
+   const isCommon=COMMON.some(c=>norm(c)===nm||nm.startsWith(norm(c)));
+   if(!isCommon) return {st:'skip',msg:'공통과목이 아니어서 해당하지 않습니다'};
+   const t=s.text.replace(/\s/g,'');
+   const has=t.includes('최소성취수준');
+   const has40=/학업성취율40%|40%/.test(t);
+   if(has&&has40) return {st:'pass',msg:'최소 성취수준과 도달 기준(40%)이 있습니다'};
+   if(has) return {st:'fail',msg:'최소 성취수준은 있으나 도달 기준(학업 성취율 40%) 표기가 확인되지 않습니다'};
+   return {st:'fail',msg:'최소 성취수준 진술문이 없습니다. 공통과목은 필수입니다'};
+ }},
+
+{id:'rubric',name:'채점기준의 지양 표현',level:'warn',
+ run(s){
+   const pats=[['과제 수행률(%)',/수행률\s*\d{1,3}\s*%|과제\s*수행률/g],
+               ['분량 기준',/\d+\s*자\s*이상|\d+\s*줄\s*이상|분량\s*미달/g],
+               ['감점',/감점/g],['지적 횟수',/지적\s*횟수|지적을?\s*\d+회/g],
+               ['출석률',/출석률/g]];
+   const hit=pats.map(([n,re])=>[n,(s.text.match(re)||[]).length]).filter(x=>x[1]>0);
+   if(!hit.length) return {st:'pass',msg:'지양 표현이 발견되지 않았습니다'};
+   const ex=[];
+   for(const [n,re] of pats){
+     const m=s.text.match(re);
+     if(m) ex.push(`${n}: ${[...new Set(m)].slice(0,4).join(' / ')}`);
+   }
+   return {st:'fail',msg:'수행 수준을 과제 수행률, 분량, 감점, 지적 횟수, 출석률로 제시하는 것은 지양 대상입니다',
+           det:ex.join('\n')};
+ }},
+
+{id:'levelstate',name:'성취수준 진술 빈칸 (A~E)',level:'warn',
+ run(s){
+   // 'A' 뿐 아니라 'A\n(80% 이상~100%)' 같은 표기도 등급 칸으로 인식
+   const gradeOf=t=>{const m=(t||'').trim().match(/^([A-E])(?:$|[\s(（\n])/);return m?m[1]:null;};
+   const found=[];
+   for(const b of s.blocks){
+     if(b.type!=='tbl') continue;
+     const t=b.tbl;
+     // 기준 성취율 표(성취율 → 성취도)는 진술 표가 아니므로 제외
+     if((t.filled[0]||[]).some(x=>x.replace(/\s/g,'').includes('성취율'))) continue;
+     for(let col=0;col<Math.min(t.nc,3);col++){
+       if(t.nc<col+2) break;   // 등급 뒤에 진술 칸이 있어야 함
+       const here=t.cells.filter(c=>c.c===col&&gradeOf(c.text));
+       if(here.length>=3){ found.push({t,col,cells:here}); break; }
+     }
+   }
+   if(!found.length) return {st:'unknown',msg:'성취수준 진술 표를 찾지 못했습니다'};
+   const blanks=[];
+   for(const f of found)
+     for(const c of f.cells){
+       const body=(f.t.filled[c.r]||[]).slice(f.col+1).join('').trim();
+       if(!body) blanks.push(gradeOf(c.text));
+     }
+   const tbls=found;
+   if(!blanks.length) return {st:'pass',msg:`성취수준 진술 표 ${tbls.length}개, 빈칸 없음`};
+   return {st:'fail',msg:`진술이 비어 있는 수준: ${[...new Set(blanks)].join(', ')}`};
+ }},
+
+{id:'codes',name:'성취기준 코드와 운영계획 대조',level:'warn',
+ run(s){
+   const R=s.ratio;
+   const planCodes=new Set(), evalCodes=new Set();
+   // 운영계획 표: '단원명'과 '성취기준' 열이 있는 표
+   for(const b of s.blocks){
+     if(b.type!=='tbl') continue;
+     const head=(b.tbl.filled[0]||[]).map(x=>x.replace(/\s/g,''));
+     const isPlan=head.some(h=>h.includes('단원명'))&&head.some(h=>h.includes('성취기준'));
+     if(!isPlan) continue;
+     for(const m of b.tbl.all.matchAll(RE_CODE)) planCodes.add(m[1]);
+   }
+   if(R&&R.ok&&R.stdCells) for(const c of R.stdCells)
+     for(const m of c.text.matchAll(RE_CODE)) evalCodes.add(m[1]);
+   if(!planCodes.size&&!evalCodes.size)
+     return {st:'unknown',msg:'성취기준 코드를 찾지 못했습니다'};
+   const onlyPlan=[...planCodes].filter(c=>!evalCodes.has(c));
+   const onlyEval=[...evalCodes].filter(c=>!planCodes.has(c));
+   const det=[`운영계획 ${planCodes.size}개 / 평가계획 ${evalCodes.size}개`];
+   if(onlyEval.length) det.push('평가에만 있음: '+onlyEval.join(', '));
+   if(onlyPlan.length) det.push('운영계획에만 있음: '+onlyPlan.join(', '));
+   if(!evalCodes.size)
+     return {st:'unknown',msg:'반영비율 표에서 성취기준 코드를 읽지 못했습니다',det:det.join('\n')};
+   if(onlyEval.length)
+     return {st:'fail',msg:`평가계획에만 있고 교수학습 운영계획에 없는 성취기준 ${onlyEval.length}개`,det:det.join('\n')};
+   return {st:'pass',msg:`평가계획 성취기준이 모두 운영계획에 있습니다 (${evalCodes.size}개)`,det:det.join('\n')};
+ }},
+
+{id:'method',name:'평가 방법 표시',level:'warn',
+ run(s){
+   if(!/논술|구술|발표|토의|토론|프로젝트|실험|실습|포트폴리오/.test(s.text))
+     return {st:'unknown',msg:'평가 방법 항목을 찾지 못했습니다'};
+   const checked=(s.text.match(/[☑☒■●▣✔√]/g)||[]).length;
+   const boxes=(s.text.match(/[□☐]/g)||[]).length;
+   const circles=(s.text.match(/○/g)||[]).length;
+   if(checked+circles===0&&boxes>0)
+     return {st:'fail',msg:`선택 표시가 없는 빈 체크박스만 ${boxes}개 있습니다`};
+   return {st:'pass',msg:`평가 방법 선택 표시 ${checked+circles}개`};
+ }}
+];
+const round=n=>Math.round(n*100)/100;
+
+/* ============================================================
+   6. 실행
+   ============================================================ */
+function collectPerfDetails(s){
+  const out=[];
+  const re=/수행평가\s*영역\s*[:：]\s*(.+?)\s*(?:\(\s*(\d+(?:\.\d+)?)\s*점\s*\))?\s*$/;
+  for(const b of s.blocks){
+    let cand=[];
+    if(b.type==='p') cand=[b.text];
+    else cand=b.tbl.cells.map(c=>c.text);
+    for(const t of cand){
+      for(const line of t.split('\n')){
+        const one=line.replace(/\s+/g,' ').trim();
+        if(!/수행평가\s*영역/.test(one)) continue;
+        const m=one.match(re);
+        if(m&&m[1]&&m[1].length<50){
+          const nm=m[1].replace(/^[가-힣]\.\s*/,'').trim();
+          if(nm&&!out.some(o=>norm(o.name)===norm(nm)))
+            out.push({name:nm,score:m[2]?parseFloat(m[2]):null});
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function review(subject){
+  subject.meta=subjectMeta(subject);
+  const top=subject.blocks.filter(b=>!b.nested);
+  subject.text=(top.length?top:subject.blocks)
+    .map(b=>b.type==='p'?b.text:b.tbl.cells.map(c=>c.text).join('\n')).join('\n');
+  const rt=findRatioTable(subject);
+  subject.ratio=rt?parseRatio(rt):null;
+  subject.perfDetails=collectPerfDetails(subject);
+  subject.results=RULES.map(r=>{
+    let res;
+    try{ res=r.run(subject); }
+    catch(e){ res={st:'unknown',msg:'검사 중 오류: '+e.message}; }
+    return {rule:r,...res};
+  });
+  return subject;
+}
+
+/* ============================================================
+   7. 화면
+   ============================================================ */
+const out=document.getElementById('out'), msg=document.getElementById('msg');
+let SUBJECTS=[];
+
+function statusOf(r){
+  if(r.st==='skip') return {cls:'ok',tag:'해당없음',t:'t-ok'};
+  if(r.st==='pass') return {cls:'ok',tag:'통과',t:'t-ok'};
+  if(r.st==='unknown') return {cls:'unk',tag:'판정 불가',t:'t-unk'};
+  return r.rule.level==='error'?{cls:'err',tag:'오류',t:'t-err'}:{cls:'warn',tag:'경고',t:'t-warn'};
+}
+const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function render(){
+  if(!SUBJECTS.length){ out.innerHTML='<div class="empty">아직 검토한 파일이 없습니다.</div>'; return; }
+  let nE=0,nW=0,nU=0,clean=0;
+  for(const s of SUBJECTS){
+    const c=count(s); s._c=c;
+    nE+=c.err; nW+=c.warn; nU+=c.unk;
+    if(!c.err&&!c.warn) clean++;
+  }
+  const filter=document.getElementById('flt')?.value||'all';
+  let html=`
+  <div class="sum">
+    <div class="box"><div class="n">${SUBJECTS.length}</div><div class="l">검토한 과목</div></div>
+    <div class="box"><div class="n err">${nE}</div><div class="l">오류</div></div>
+    <div class="box"><div class="n warn">${nW}</div><div class="l">경고</div></div>
+    <div class="box"><div class="n unk">${nU}</div><div class="l">판정 불가</div></div>
+    <div class="box"><div class="n ok">${clean}</div><div class="l">문제 없는 과목</div></div>
+  </div>
+  <div class="bar">
+    <select id="flt">
+      <option value="all">전체 과목</option>
+      <option value="err">오류가 있는 과목만</option>
+      <option value="warn">오류 또는 경고가 있는 과목만</option>
+      <option value="unk">판정 불가가 있는 과목만</option>
+    </select>
+    <button onclick="openAll(true)">모두 펼치기</button>
+    <button onclick="openAll(false)">모두 접기</button>
+    <button onclick="copyReport()">수정 요청 문구 복사</button>
+    <button onclick="window.print()">인쇄 / PDF</button>
+  </div>
+  <div class="note">
+    <b>판정 불가</b>는 통과가 아닙니다. 표 구조를 읽지 못해 검산하지 못한 항목이므로 직접 확인해 주세요.
+    성취기준 원문과의 대조(임의 변경 여부)와 채점기준의 구체성은 자동 판정 대상이 아닙니다.
+  </div>`;
+
+  for(const [i,s] of SUBJECTS.entries()){
+    const c=s._c;
+    if(filter==='err'&&!c.err) continue;
+    if(filter==='warn'&&!c.err&&!c.warn) continue;
+    if(filter==='unk'&&!c.unk) continue;
+    const badges=[];
+    if(c.err) badges.push(`<span class="badge b-err">오류 ${c.err}</span>`);
+    if(c.warn) badges.push(`<span class="badge b-warn">경고 ${c.warn}</span>`);
+    if(c.unk) badges.push(`<span class="badge b-unk">판정 불가 ${c.unk}</span>`);
+    if(!badges.length) badges.push(`<span class="badge b-ok">이상 없음</span>`);
+    html+=`<div class="subj" id="sj${i}">
+      <div class="head" onclick="document.getElementById('sj${i}').classList.toggle('open')">
+        <span class="nm">${esc(s.meta.name||'(과목명 미확인)')}</span>
+        <span class="meta">${esc([s.meta.grade,s.meta.semester,s.fileName].filter(Boolean).join(' · '))}</span>
+        <span class="sp">${badges.join('')}</span>
+      </div>
+      <div class="body">`;
+    for(const r of s.results){
+      const st=statusOf(r);
+      const pass=(r.st==='pass'||r.st==='skip');
+      html+=`<div class="rule ${pass?'pass':''}">
+        <div class="t"><span class="tag ${st.t}">${st.tag}</span>
+          <div><div class="nmr">${esc(r.rule.name)}</div>
+          <div class="msg">${esc(r.msg||'')}</div>
+          ${r.det?`<div class="det">${esc(r.det)}</div>`:''}
+          </div></div></div>`;
+    }
+    html+=`</div></div>`;
+  }
+  out.innerHTML=html;
+  const f=document.getElementById('flt'); if(f){ f.value=filter; f.onchange=render; }
+}
+function count(s){
+  let err=0,warn=0,unk=0;
+  for(const r of s.results){
+    if(r.st==='unknown') unk++;
+    else if(r.st==='fail') (r.rule.level==='error'?err++:warn++);
+  }
+  return {err,warn,unk};
+}
+function openAll(v){ document.querySelectorAll('.subj').forEach(e=>e.classList.toggle('open',v)); }
+function copyReport(){
+  const lines=[];
+  for(const s of SUBJECTS){
+    const bad=s.results.filter(r=>r.st==='fail'||r.st==='unknown');
+    if(!bad.length) continue;
+    lines.push(`■ ${s.meta.name||s.title} (${s.meta.grade||''})`);
+    for(const r of bad){
+      const t=r.st==='unknown'?'[확인]':(r.rule.level==='error'?'[수정]':'[검토]');
+      lines.push(`  ${t} ${r.rule.name} - ${r.msg}`);
+    }
+    lines.push('');
+  }
+  const txt=lines.join('\n')||'수정할 항목이 없습니다.';
+  navigator.clipboard.writeText(txt).then(
+    ()=>alert('수정 요청 문구를 복사했습니다.'),
+    ()=>{ const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
+          ta.select(); document.execCommand('copy'); ta.remove(); alert('복사했습니다.'); });
+}
+
+/* 파일 처리 */
+async function handle(files){
+  msg.textContent=''; out.innerHTML='<div class="empty">읽는 중…</div>';
+  const subs=[];
+  for(const f of files){
+    if(!/\.hwpx$/i.test(f.name)){
+      msg.textContent=`${f.name} 은 hwpx가 아닙니다. 한글에서 hwpx로 저장한 뒤 다시 넣어 주세요.`;
+      continue;
+    }
+    try{
+      const zip=await unzip(await f.arrayBuffer());
+      const names=Object.keys(zip).filter(n=>/^Contents\/section\d+\.xml$/.test(n))
+        .sort((a,b)=>+a.match(/(\d+)/)[1]-+b.match(/(\d+)/)[1]);
+      if(!names.length) throw new Error('본문(section) 을 찾지 못했습니다');
+      let blocks=[];
+      for(const n of names){
+        const xml=new TextDecoder('utf-8').decode(await inflate(zip[n]));
+        const doc=new DOMParser().parseFromString(xml,'application/xml');
+        if(doc.querySelector('parsererror')) throw new Error('본문 XML 해석 실패');
+        blocks=blocks.concat(buildBlocks(doc));
+      }
+      for(const s of splitSubjects(blocks,f.name)) subs.push(review(s));
+    }catch(e){
+      msg.textContent=`${f.name} : ${e.message}`;
+    }
+  }
+  SUBJECTS=subs;
+  render();
+}
+
+const drop=document.getElementById('drop'), fin=document.getElementById('file');
+drop.onclick=()=>fin.click();
+fin.onchange=e=>handle([...e.target.files]);
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('on');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('on');}));
+drop.addEventListener('drop',e=>handle([...e.dataTransfer.files]));
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>e.preventDefault());
+render();
+</script>
+</body>
+</html>
