@@ -636,13 +636,27 @@ function collectRubricTables(s){
       // '평가요소 모두를 만족하지 못한 경우(기본점수)' 는 영역의 기본점수 행이다
       if(/기본\s*점수/.test(rowTxt)){ if(base===null) base=v; continue; }
       if(/장기\s*미인정|백지\s*활동지|자발적\s*미참여/.test(rowTxt)) continue;
+      // '위 평가 요소별 배점을 합산한 결과' 같은 합계 행은 별도 평가요소가 아니다
+      if(/합산|합계|위\s*평가\s*요소/.test(rowTxt)) continue;
       const nm=ei>=0?((t.filled[r][ei]||'').replace(/\s+/g,' ').trim()):'';
       const key=nm||'(평가요소 미표기)';
       if(!cur||cur.name!==key){ cur={name:key,scores:[]}; groups.push(cur); }
       cur.scores.push(v);
     }
     const keep=groups.filter(g=>g.scores.length>=2);
-    if(keep.length) out.push({groups:keep, base});
+    // 한 평가요소 안에서 배점이 5,4,3,2,5,4,3,2 처럼 다시 올라가면
+    // 채점 항목이 여러 개라는 뜻이다. 내림차순이 끊기는 곳에서 나눠 세야
+    // 영역 만점과 맞는다 (5,4,3,2 ×3 → 15점, 5 아님).
+    for(const g of keep){
+      g.runs=[]; let run=null;
+      for(const v of g.scores){
+        if(!run||v>run[run.length-1]){ run=[v]; g.runs.push(run); }
+        else run.push(v);
+      }
+      g.max=g.runs.reduce((a,r)=>a+Math.max(...r),0);
+    }
+    if(keep.length) out.push({groups:keep, base,
+      total:keep.reduce((a,g)=>a+g.max,0)});
   }
   return out;
 }
@@ -1233,6 +1247,61 @@ const RULES=[
    return {st:'fail',msg:`선택과목인데 최소 성취수준 진술 표가 ${tabs.length}개 있습니다. 1·2학년 선택과목은 작성하지 않습니다`};
  }},
 
+{id:'termmatch',name:'학기 표기 일치 (표지 ↔ 수행평가 세부기준)',level:'error',
+ run(s){
+   const sem=(s.meta.semester||'').replace(/\s/g,'');
+   const want=(sem.match(/([12])\s*학기/)||sem.match(/^([12])$/)||[])[1];
+   if(!want) return {st:'unknown',msg:'표지에서 학기를 읽지 못했습니다'};
+   // 1·2학년 양식의 수행평가 세부기준 표 머리에 '학기 | 1학기' 칸이 있다.
+   // 병합 때문에 '학기'가 두 칸에 걸치므로, 오른쪽으로 훑어 첫 값을 취한다.
+   const found=[];
+   for(const b of s.blocks){
+     if(b.type!=='tbl') continue;
+     const t=b.tbl;
+     if(!/평가\s*영역명/.test(t.all)) continue;
+     for(let r=0;r<t.nr;r++) for(let c=0;c<t.nc;c++){
+       if((t.filled[r][c]||'').replace(/\s/g,'')!=='학기') continue;
+       for(let j=c+1;j<t.nc;j++){
+         const v=(t.filled[r][j]||'').replace(/\s/g,'');
+         if(!v||v==='학기') continue;
+         found.push(v); break;
+       }
+     }
+   }
+   const uniq=[...new Set(found)];
+   if(!uniq.length)
+     return {st:'skip',msg:'수행평가 세부기준 표에 학기 칸이 없는 양식입니다'};
+   const bad=uniq.filter(v=>{const m=v.match(/([12])/); return !m||m[1]!==want;});
+   const det=`표지 ${want}학기 / 세부기준 표기: ${uniq.join(', ')}`;
+   if(!bad.length) return {st:'pass',msg:`표지와 세부기준이 모두 ${want}학기입니다`,det};
+   return {st:'fail',
+           msg:`표지는 ${want}학기인데 수행평가 세부기준에 '${bad.join("', '")}' 표기가 있습니다`,det};
+ }},
+
+{id:'scoresum',name:'채점 배점 합과 영역 만점 일치',level:'error',
+ run(s){
+   const ts=collectRubricTables(s);
+   if(!ts.length) return isRubricless(s)
+     ? {st:'skip',msg:'배점 대신 성취기준별 성취수준으로 채점기준을 제시하는 양식입니다'}
+     : {st:'unknown',msg:'채점기준표(배점 열)를 찾지 못했습니다'};
+   const R=s.ratio;
+   const areas=(R&&R.ok&&R.suAreas)?R.suAreas.filter(a=>a.score):[];
+   if(!areas.length) return {st:'unknown',msg:'반영비율 표에서 수행평가 영역 만점을 읽지 못했습니다'};
+   if(areas.length!==ts.length)
+     return {st:'unknown',
+             msg:`수행평가 영역 ${areas.length}개와 채점기준표 ${ts.length}개가 맞지 않아 대조하지 못했습니다`};
+   const det=[],bad=[];
+   ts.forEach((tb,i)=>{
+     const nm=areas[i].name.replace(/\n/g,' ').slice(0,24);
+     det.push(`${nm} : 영역 만점 ${round(areas[i].score)}점 / 채점 배점 합 ${round(tb.total)}점`);
+     if(Math.abs(areas[i].score-tb.total)>0.01)
+       bad.push(`${nm} — 영역 만점은 ${round(areas[i].score)}점인데 채점 배점 합은 ${round(tb.total)}점`);
+   });
+   if(!bad.length) return {st:'pass',msg:'채점 배점 합이 영역 만점과 모두 같습니다',det:det.join('\n')};
+   return {st:'fail',msg:`채점 배점 합이 영역 만점과 다른 영역 ${bad.length}개`,
+           det:bad.concat('',det).join('\n')};
+ }},
+
 {id:'codemix',name:'성취기준이 이 과목 것인지',level:'error',
  run(s){
    // 성취기준 코드의 한글 약칭은 과목마다 정해져 있다.
@@ -1648,6 +1717,8 @@ const ANCHORS={
   elevel:['기준 성취율','성취도'],
   levelmatch:['기준 성취율','성취기준별 성취수준','성취도'],
   codemix:['성취기준'],
+  termmatch:['학기','평가영역명','수행평가 세부'],
+  scoresum:['배점','채점 기준','영역 만점','영역만점'],
   guide:[]     // 자리를 특정할 수 없어 문서 맨 앞
 };
 
