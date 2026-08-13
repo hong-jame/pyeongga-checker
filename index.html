@@ -1233,6 +1233,34 @@ const RULES=[
    return {st:'fail',msg:`선택과목인데 최소 성취수준 진술 표가 ${tabs.length}개 있습니다. 1·2학년 선택과목은 작성하지 않습니다`};
  }},
 
+{id:'codemix',name:'성취기준이 이 과목 것인지',level:'error',
+ run(s){
+   // 성취기준 코드의 한글 약칭은 과목마다 정해져 있다.
+   //   미술 [12미01-01] · 미술창작 [12미창02-01] · 음악 [12음01-01]
+   // 한 계획서에 두 과목 약칭이 섞여 있으면 다른 과목 계획서를 베껴 온 흔적이다.
+   const re=/\[\s*(\d{2})\s*([가-힣]{1,6}?)\s*(\d{1,2})\s*-\s*(\d{2})/g;
+   const found={};
+   for(const m of s.text.matchAll(re)){
+     const ab=m[2];
+     (found[ab]=found[ab]||[]).push(`[${m[1]}${ab}${m[3]}-${m[4]}]`);
+   }
+   const abbrs=Object.keys(found);
+   if(!abbrs.length) return {st:'unknown',msg:'성취기준 코드를 찾지 못했습니다'};
+
+   const det=abbrs.map(a=>`${a} : ${found[a].length}개  ${[...new Set(found[a])].slice(0,4).join(' ')}`).join('\n');
+   if(abbrs.length>1){
+     const main=abbrs.slice().sort((a,b)=>found[b].length-found[a].length)[0];
+     const others=abbrs.filter(a=>a!==main);
+     return {st:'fail',
+             msg:`성취기준이 서로 다른 과목 것으로 섞여 있습니다 — 주로 '${main}'인데 '${others.join("', '")}'가 함께 있습니다`,
+             det};
+   }
+   // 과목명과 약칭을 맞춰 보는 검사는 넣지 않았다.
+   // 약칭 규칙이 과목마다 들쭉날쭉해 오탐이 나기 쉽다(융합과학↔융과, 매체 의사소통↔매의).
+   // 섞였는지만 보아도 다른 과목 계획서를 베껴 온 경우는 걸린다.
+   return {st:'pass',msg:`성취기준 ${found[abbrs[0]].length}개가 모두 '${abbrs[0]}' 과목 것입니다`,det};
+ }},
+
 {id:'levelmatch',name:'성취도 단계 일치 (평정표 ↔ 성취수준 진술)',level:'error',
  run(s){
    // 문서는 성취도 단계를 두 곳에서 말한다.
@@ -1619,6 +1647,7 @@ const ANCHORS={
   minlevelx:['최소 성취수준','성취수준'],
   elevel:['기준 성취율','성취도'],
   levelmatch:['기준 성취율','성취기준별 성취수준','성취도'],
+  codemix:['성취기준'],
   guide:[]     // 자리를 특정할 수 없어 문서 맨 앞
 };
 
