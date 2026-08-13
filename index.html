@@ -1233,6 +1233,70 @@ const RULES=[
    return {st:'fail',msg:`선택과목인데 최소 성취수준 진술 표가 ${tabs.length}개 있습니다. 1·2학년 선택과목은 작성하지 않습니다`};
  }},
 
+{id:'levelmatch',name:'성취도 단계 일치 (평정표 ↔ 성취수준 진술)',level:'error',
+ run(s){
+   // 문서는 성취도 단계를 두 곳에서 말한다.
+   //  ① 기준 성취율과 성취도 표 — <성취도 N단계 평정> 표지, 없으면 최저 등급 글자
+   //  ② 수행평가 세부기준의 '성취기준별 성취수준' 표 — A~E 인지 A~C 인지
+   // 둘이 어긋나면 한쪽이 잘못된 것이다. 과목 분류표가 없어도 잡을 수 있다.
+   const t=s.text.replace(/\s/g,'');
+   let declared=null, how='';
+   const tag=t.match(/성취도(\d)단계평정/);
+   if(tag){ declared=+tag[1]; how=`평정표 표지 ${declared}단계`; }
+   else if(/60%미만E/.test(t)){ declared=5; how='평정표 최저 등급 E'; }
+   else if(/60%미만C/.test(t)){ declared=3; how='평정표 최저 등급 C'; }
+
+   // 성취수준 진술 표는 여러 개다(성취기준별 표 + 수행평가 세부기준 표).
+   // 표마다 따로 세야 어느 표가 잘못됐는지 짚어 줄 수 있다.
+   const tabs=[];
+   for(const b of s.blocks){
+     if(b.type!=='tbl') continue;
+     const all=b.tbl.all;
+     if(!/성취기준별/.test(all)||!/성취수준/.test(all)) continue;
+     const set=new Set();
+     for(const c of b.tbl.cells){
+       const x=(c.text||'').trim();
+       if(/^[A-E]$/.test(x)) set.add(x);
+     }
+     if(!set.size) continue;
+     const letters=[...set].sort().join('');
+     const head=(b.tbl.filled[0]||[]).slice(0,2).map(x=>(x||'').replace(/\s+/g,' ').slice(0,20))
+                 .filter(Boolean).join(' / ');
+     tabs.push({letters, n:(set.has('D')||set.has('E'))?5:3, head});
+   }
+   const lv=new Set(); tabs.forEach(t=>t.letters.split('').forEach(c=>lv.add(c)));
+   const letters=[...lv].sort().join('');
+   const kinds=[...new Set(tabs.map(t=>t.n))];
+   const tabDet=tabs.map(t=>`  ${t.head || '(표)'} → ${t.letters} (${t.n}단계)`).join('\n');
+
+   // 문서 안에서도 표끼리 어긋나는 경우
+   if(kinds.length>1)
+     return {st:'fail',
+             msg:`성취수준 진술 표끼리 단계가 다릅니다 — ${kinds.join('단계와 ')}단계가 섞여 있습니다`,
+             det:`${how}\n${tabDet}`};
+   const stated=kinds.length ? kinds[0] : null;
+
+   if(declared===null&&stated===null)
+     return {st:'unknown',msg:'성취도 단계를 어디에서도 읽지 못했습니다'};
+   if(declared===null)
+     return {st:'unknown',msg:`기준 성취율 표에서 단계를 읽지 못했습니다 (성취수준 진술은 ${letters} = ${stated}단계)`};
+   if(stated===null){
+     // 2015 개정(3학년) 양식은 성취수준을 A~E 가 아니라 상·중·하 평가기준으로 쓴다.
+     // 대조할 짝이 없으므로 판정 불가가 아니라 해당 없음이다.
+     const old2015=s.blocks.some(b=>b.type==='tbl'&&/평가\s*기준/.test(b.tbl.all)&&
+       b.tbl.cells.some(c=>/^[상중하]$/.test((c.text||'').trim())));
+     if(old2015)
+       return {st:'skip',msg:'2015 개정 양식은 성취수준을 상·중·하 평가기준으로 제시하므로 대조 대상이 아닙니다'};
+     return {st:'unknown',msg:`성취기준별 성취수준 표를 찾지 못했습니다 (${how})`};
+   }
+   const det=`${how}\n성취수준 진술: ${letters} = ${stated}단계\n${tabDet}`;
+   if(declared===stated)
+     return {st:'pass',msg:`${declared}단계로 서로 맞습니다`,det};
+   return {st:'fail',
+           msg:`성취도 단계가 어긋납니다 — 기준 성취율 표는 ${declared}단계인데 성취수준 진술은 ${letters}(${stated}단계)입니다`,
+           det};
+ }},
+
 {id:'elevel',name:'최저 성취도 구간 (공통 40%~60% · 선택 60% 미만)',level:'error',
  run(s){
    if(/3\s*학년/.test(s.meta.grade||'')) return {st:'skip',msg:'2015 개정 적용 학년은 해당하지 않습니다'};
@@ -1554,6 +1618,7 @@ const ANCHORS={
   perftime:['평가 시기','시기'],
   minlevelx:['최소 성취수준','성취수준'],
   elevel:['기준 성취율','성취도'],
+  levelmatch:['기준 성취율','성취기준별 성취수준','성취도'],
   guide:[]     // 자리를 특정할 수 없어 문서 맨 앞
 };
 
