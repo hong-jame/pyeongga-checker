@@ -1247,10 +1247,21 @@ const RULES=[
    return {st:'fail',msg:`선택과목인데 최소 성취수준 진술 표가 ${tabs.length}개 있습니다. 1·2학년 선택과목은 작성하지 않습니다`};
  }},
 
-{id:'termmatch',name:'학기 표기 일치 (표지 ↔ 수행평가 세부기준)',level:'error',
+{id:'termmatch',name:'학기 표기 일치 (제목 ↔ 표지 ↔ 수행평가 세부기준)',level:'error',
  run(s){
    const sem=(s.meta.semester||'').replace(/\s/g,'');
    const want=(sem.match(/([12])\s*학기/)||sem.match(/^([12])$/)||[])[1];
+   // 문서 제목에도 학기가 적혀 있다. 지난 학기 계획서를 복사해 고치면서
+   // 제목만 바꾸고 표지의 학기 칸을 안 고치는 일이 흔하다.
+   const tm=(s.title||'').match(/([12])\s*학기/);
+   const titleTerm=tm?tm[1]:null;
+   if(want&&titleTerm&&want!==titleTerm)
+     return {st:'fail',
+             msg:`문서 제목은 ${titleTerm}학기인데 표지의 학기 칸은 ${want}학기입니다`,
+             det:`제목: ${(s.title||'').slice(0,60)}\n표지 학기 칸: ${s.meta.semester}\n`+
+                 `※ 범교과 시수 점검이 표지 학기를 따라가므로, 이걸 고쳐야 범교과 판정도 맞습니다`};
+   if(!want&&titleTerm)
+     return {st:'unknown',msg:`표지에서 학기를 읽지 못했습니다 (문서 제목은 ${titleTerm}학기)`};
    if(!want) return {st:'unknown',msg:'표지에서 학기를 읽지 못했습니다'};
    // 1·2학년 양식의 수행평가 세부기준 표 머리에 '학기 | 1학기' 칸이 있다.
    // 병합 때문에 '학기'가 두 칸에 걸치므로, 오른쪽으로 훑어 첫 값을 취한다.
