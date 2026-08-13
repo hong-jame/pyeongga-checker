@@ -440,7 +440,15 @@ function subjectMeta(s){
    4. 반영비율 표 해석
    ============================================================ */
 const num=t=>{const m=(t||'').match(/-?\d+(?:\.\d+)?/); return m?parseFloat(m[0]):null;};
-const pct=t=>{const m=(t||'').match(/(\d+(?:\.\d+)?)\s*%/); return m?parseFloat(m[1]):null;};
+const pct=t=>{
+  const s=t||'';
+  let m=s.match(/(\d+(?:\.\d+)?)\s*%/);
+  if(m) return parseFloat(m[1]);
+  // 1·2학년 양식은 '( 30 )%' 처럼 괄호 안에 숫자, 괄호 밖에 % 를 쓴다.
+  // 이걸 못 읽으면 반영비율·영역만점·논술형 검산이 전부 판정 불가로 떨어진다.
+  m=s.match(/\(\s*(\d+(?:\.\d+)?)\s*\)\s*%/);
+  return m?parseFloat(m[1]):null;
+};
 const pctInParen=t=>{const m=(t||'').match(/\(\s*(\d+(?:\.\d+)?)\s*%\s*\)/); return m?parseFloat(m[1]):null;};
 const norm=t=>(t||'').replace(/[\s ·ㆍ‧,\.\(\)]/g,'');
 
@@ -552,24 +560,174 @@ const COMMON=['공통국어1','공통국어2','공통수학1','공통수학2','�
 // 2015 개정 [12언매01-01] 과 2022 개정 [10통과1-01-01] 두 형식을 모두 인식
 const RE_CODE=/(\d{1,2}[가-힣A-Za-z]{1,10}\d{0,2}(?:-\d{2}){1,2})/g;
 
+/* ---- 2026 2학기 양식 대응 보조 ----
+   양식 5종(3학년 / 1·2학년 선택 음미체·음미체제외 / 1학년 공통 국수영한사과·과탐실)을
+   실제로 열어 대조한 결과를 반영. 근거는 @11 학생평가\검토기_2학기_보완목록.md */
+
+// 양식 5종에 원래 들어 있는 '지필평가' 문구. 교사 오류가 아니므로 제외한다.
+const TERM_BOILER=[
+  /지필\s*평가뿐만\s*아니라/,
+  /지필\s*평가\s*횟수는\s*수행평가/,
+  /학기당\s*2회\s*이내로\s*실시/,
+  /지필\s*평가만으로\s*평가\s*불가/,
+  /지필\s*평가\s*성적\s*반영\s*비율\s*100\s*%/,
+  /일제식\s*지필\s*평가/,
+  /일제고사\s*형태의\s*지필\s*평가/,
+  /지필\s*평가\s*및\s*수행평가의\s*반영\s*비율\s*환산/,
+  /지필\s*평가\s*1\s*~?\s*2\s*주\s*전/,
+  // 교육과정 총론을 그대로 인용한 문장 (교사가 붙여넣는 경우가 있다)
+  /지필\s*평가와\s*수행\s*평가\s*등을\s*적절히\s*활용/
+];
+
+// 논술형 20% 예외 대상 (예술·체육 교과군, 전문 교과). 나머지 교과는 30%.
+const ARTS_PE=/(체육|음악|미술|무용|연극|스포츠|운동|체조|합창|기악|관현악|공예|디자인|사진|서예|미술사|음악사|연기|영화)/;
+function isArtsPE(s){
+  if(ARTS_PE.test(s.meta.name||'')) return true;
+  const t=s.text.replace(/\s/g,'');
+  // 1·2학년 양식은 교과군별로 배포돼 평정표 표지가 하나만 들어 있다.
+  // 3학년 양식은 3종이 다 들어 있어 표지로 판별할 수 없으므로 과목명만 본다.
+  const tags=t.match(/성취도\d단계평정/g)||[];
+  if(tags.length===1&&/체육[·ㆍ]?예술교과군/.test(t)) return true;
+  return false;
+}
+
+// 2026 2학기 양식의 안내·자리표시 문구 (교사가 지워야 하는 것)
+const GUIDE_PATS=[
+  ['함초롬돋움 서식 안내',/함초롬돋움/g],
+  ['택1하고 나머지 삭제',/택\s*1\s*하고[,，]?\s*나머지\s*삭제/g],
+  ['맞게 변경하여 삽입',/맞게\s*변경하여\s*삽입/g],
+  ['참고하시되 / 참고해주세요',/참고하시되|참고해\s*주세요/g],
+  ['ex) 예시',/\bex\s*\)/g],
+  ['O월 O주 자리표시',/O\s*월\s*O\s*주/g],
+  ['OOO(OO점) 자리표시',/O{3,}\s*\(\s*O+\s*점\s*\)/g],
+  ['[중요] 안내',/\[\s*중요\s*\]/g],
+  ['교육청 지적사항 안내',/교육청\s*지적/g],
+  ['작명 신경쓰기',/작명\s*신경\s*쓰기/g],
+  ['평가영역명(20점) 자리표시',/평가\s*영역명\s*\(\s*20\s*점\s*\)/g],
+  ['동그라미(○) 표시 안내',/해당하는\s*것에\s*동그라미/g],
+  ['수정하여 사용 안내',/수정하여\s*사용/g],
+  ['임의로 변경할 수 없으며',/임의로\s*변경할\s*수\s*없으며/g],
+  ['◯◯ 자리표시',/◯◯/g],
+  ['묶음 개체입니다',/묶음\s*개체입니다/g],
+  ['※ 박스는',/※\s*박스는/g],
+  ['<유의사항>',/<\s*유의사항\s*>/g],
+  ['참고 링크(edunet)',/edunet\.net/g]
+];
+
+/* 수행평가 세부 채점기준표를 읽는다.
+   구조: [평가요소 | 채점 기준 | 배점] 이고 평가요소별로 배점이 내려간다.
+     사례를 조사하여…  10 / 8 / 6 / 4 / 2   ← 최고점이 그 요소의 만점, 최저점이 기본점수
+   표 하나가 수행평가 영역 하나에 대응한다(요소 만점의 합 = 영역 만점). */
+function collectRubricTables(s){
+  const out=[];
+  for(const b of s.blocks){
+    if(b.type!=='tbl') continue;
+    const t=b.tbl;
+    const head=(t.filled[0]||[]).map(x=>(x||'').replace(/\s/g,''));
+    const ci=head.findIndex(h=>h.includes('배점'));
+    if(ci<0||t.nr<3) continue;
+    const ei=head.findIndex(h=>h.includes('평가요소'));
+    const groups=[]; let cur=null, base=null;
+    for(let r=1;r<t.nr;r++){
+      const v=num(t.filled[r][ci]);
+      if(v===null) continue;
+      const rowTxt=(t.filled[r]||[]).join(' ');
+      // '평가요소 모두를 만족하지 못한 경우(기본점수)' 는 영역의 기본점수 행이다
+      if(/기본\s*점수/.test(rowTxt)){ if(base===null) base=v; continue; }
+      if(/장기\s*미인정|백지\s*활동지|자발적\s*미참여/.test(rowTxt)) continue;
+      const nm=ei>=0?((t.filled[r][ei]||'').replace(/\s+/g,' ').trim()):'';
+      const key=nm||'(평가요소 미표기)';
+      if(!cur||cur.name!==key){ cur={name:key,scores:[]}; groups.push(cur); }
+      cur.scores.push(v);
+    }
+    const keep=groups.filter(g=>g.scores.length>=2);
+    if(keep.length) out.push({groups:keep, base});
+  }
+  return out;
+}
+
+/* 2022 개정(1·2학년) 양식은 배점 급간 대신 성취기준별 성취수준 A~E 서술로 채점기준을 쓴다.
+   이 경우 급간·기본점수 검산은 해당 사항이 없다(판정 불가가 아니라 건너뜀). */
+const isRubricless=s=>!collectRubricTables(s).length && /성취기준별\s*성취수준/.test(s.text);
+
+/* 과제형·암기식은 '수행평가를 어떻게 설계했는지'의 문제다.
+   본문의 평가 총론(“단순 지식 암기보다는 …”)까지 훑으면 오탐만 난다.
+   그래서 영역명·평가요소·채점기준 칸만 모아서 본다. */
+function perfText(s){
+  const out=[], R=s.ratio;
+  if(R&&R.ok&&R.suRange){
+    for(const a of (R.suAreas||[])) out.push(a.name);
+    for(const b of s.blocks){
+      if(b.type!=='tbl') continue;
+      const r=rowByLabel(b.tbl,'평가요소');
+      if(r>=0) for(const c of (b.tbl.rows[r]||[]))
+        if(c.c>=R.suRange[0]&&c.c<=R.suRange[1]) out.push(c.text);
+    }
+  }
+  for(const b of s.blocks){
+    if(b.type!=='tbl') continue;
+    if(/배점|채점\s*기준|평가영역명|수행과제/.test(b.tbl.all)) out.push(b.tbl.all);
+  }
+  return out.join('\n');
+}
+
+/* 과제형·암기식 판정에서 빼야 하는 양식 원본 문구와 정형 표현 */
+const TASK_BOILER=[
+  /과제형\s*평가\s*금지/,
+  /과제형[,，]?\s*일제식\s*수행평가\s*불가/,
+  /과제형\s*평가로\s*실시하지\s*않/,
+  /과제형\s*수행평가[^\n]{0,20}실시하지\s*않/,
+  /정규\s*수업\s*시간\s*중에\s*실시하는\s*것이\s*원칙/,
+  /일제식\s*지필\s*평가로\s*실시할\s*수\s*없/,
+  // '암기를 지양한다'는 뜻의 교육과정 총론 문구
+  /암기[^\n]{0,30}(?:보다는|지양|아니라|치중하지|않도록|벗어나|여부를\s*확인하는\s*데)/,
+  /(?:단순|단편적)[^\n]{0,20}암기/
+];
+
 const RULES=[
 {id:'term',name:'평가 용어 (지필평가 → 정기시험)',level:'error',
  run(s){
-   const hits=[...s.text.matchAll(/지필\s*평가/g)];
-   if(!hits.length) return {st:'pass',msg:'지필평가 표현이 없습니다'};
-   const ex=hits.slice(0,6).map(m=>'… '+s.text.slice(Math.max(0,m.index-40),m.index+40).replace(/\n/g,' ')+' …');
-   return {st:'fail',msg:`'지필평가' ${hits.length}회 발견. 2026학년도 양식은 '정기시험'으로 바뀌었습니다`,det:ex.join('\n')};
+   const R=s.ratio;
+   // 반영비율 표의 평가 유형이 '지필평가'면 용어를 안 바꾼 것 (확실한 오류)
+   const tableHit=!!(R&&R.ok&&/지필\s*평가/.test(R.termLabel||''));
+   // 본문은 양식 원본 문구를 뺀 나머지만 본다
+   const body=[];
+   for(const m of s.text.matchAll(/지필\s*평가/g)){
+     const w=s.text.slice(Math.max(0,m.index-90),m.index+90).replace(/\s+/g,' ').trim();
+     if(TERM_BOILER.some(re=>re.test(w))) continue;
+     body.push('… '+w+' …');
+   }
+   if(tableHit)
+     return {st:'fail',
+             msg:"반영비율 표의 평가 유형이 '지필평가'로 되어 있습니다. 2026학년도 양식은 '정기시험'입니다",
+             det:body.slice(0,6).join('\n')};
+   if(body.length)
+     return {st:'fail',
+             msg:`양식 원본에 없는 '지필평가' 표현이 ${body.length}곳 있습니다`,
+             det:body.slice(0,6).join('\n')};
+   return {st:'pass',msg:'평가 유형이 정기시험이고, 양식 밖 지필평가 표현도 없습니다'};
  }},
 
 {id:'guide',name:'양식 안내 문구 삭제',level:'warn',
  run(s){
-   const pats=[['<유의사항>',/<\s*유의사항\s*>/g],['※ 박스는',/※\s*박스는/g],
-               ['묶음 개체입니다',/묶음 개체입니다/g],['◯◯',/◯◯/g],
-               ['참고 링크',/edunet\.net/g]];
-   const found=pats.map(([n,re])=>[n,(s.text.match(re)||[]).length]).filter(x=>x[1]>0);
-   if(!found.length) return {st:'pass',msg:'안내용 문구가 남아 있지 않습니다'};
-   return {st:'fail',msg:'양식의 안내 문구가 남아 있습니다',
-           det:found.map(([n,c])=>`${n} : ${c}회`).join('\n')};
+   // 2026 2학기 양식의 안내 문구는 대부분 한글 '메모'로 들어 있다.
+   // memo 규칙은 개수만 세므로, 여기서는 어떤 안내가 남았는지 종류로 알려준다.
+   const ms=new Set();
+   for(const b of s.blocks) for(const m of (b.memos||b.tbl&&b.tbl.memos||[])) ms.add(m);
+   const memoText=[...ms].join('\n');
+   const rows=[];
+   for(const [n,re] of GUIDE_PATS){
+     const inBody=(s.text.match(re)||[]).length;
+     const inMemo=(memoText.match(re)||[]).length;
+     if(inBody+inMemo>0) rows.push([n,inBody,inMemo]);
+   }
+   if(!rows.length) return {st:'pass',msg:'안내용 문구가 남아 있지 않습니다'};
+   const tb=rows.reduce((a,r)=>a+r[1],0), mb=rows.reduce((a,r)=>a+r[2],0);
+   const where=[]; if(tb) where.push(`본문 ${tb}회`); if(mb) where.push(`메모 ${mb}회`);
+   return {st:'fail',
+           msg:`양식의 안내·자리표시 문구가 ${rows.length}종 남아 있습니다 (${where.join(', ')})`,
+           det:rows.map(([n,a,b])=>`${n} : `+
+                [a?`본문 ${a}회`:'',b?`메모 ${b}회`:''].filter(Boolean).join(', ')).join('\n')};
  }},
 
 {id:'memo',name:'문서에 남은 메모',level:'warn',
@@ -612,6 +770,34 @@ const RULES=[
    if(!R.jgHas&&!R.suHas) return {st:'unknown',msg:'영역 만점 칸에 비율(%) 표기가 없습니다'};
    if(!bad.length) return {st:'pass',msg:out.join(' · ')};
    return {st:'fail',msg:`${bad.join(', ')} 영역 만점 비율의 합이 반영비율과 다릅니다`,det:out.join('\n')};
+ }},
+
+{id:'sumin',name:'수행평가 반영비율 하한 (30% 이상)',level:'error',
+ run(s){
+   const R=s.ratio;
+   if(!R||!R.ok||R.suRatio===null||R.suRatio===undefined)
+     return {st:'unknown',msg:'수행평가 반영비율을 읽지 못했습니다'};
+   if(R.suRatio>=30)
+     return {st:'pass',msg:`수행평가 ${R.suRatio}% (2026학년도 2학기 기준 30% 이상)`};
+   return {st:'fail',
+           msg:`수행평가 반영비율이 ${R.suRatio}%입니다. 2026학년도 2학기 기준은 30% 이상입니다 (1학기 40%에서 완화)`};
+ }},
+
+{id:'essaymin',name:'논술형 반영비율 하한 (30% 이상, 예술·체육 20%)',level:'error',
+ run(s){
+   const R=s.ratio;
+   if(!R||!R.ok||R.essaySum===undefined)
+     return {st:'unknown',msg:'논술형 반영비율 행을 찾지 못했습니다'};
+   const got=(R.essayStated!==null&&R.essayStated!==undefined)?R.essayStated:R.essaySum;
+   if(got===null||got===undefined)
+     return {st:'unknown',msg:'논술형 반영비율 값을 읽지 못했습니다'};
+   const arts=isArtsPE(s);
+   const need=arts?20:30;
+   const label=arts?'예술·체육 교과군 기준 20% 이상':'기준 30% 이상';
+   const note=arts?'예술·체육 교과군으로 판정했습니다. 아니라면 과목명을 확인하세요':'';
+   if(got>=need) return {st:'pass',msg:`논술형 ${round(got)}% (${label})`,det:note};
+   return {st:'fail',
+           msg:`논술형 반영비율이 ${round(got)}%입니다. ${label}입니다 (1학기 35%에서 완화)`,det:note};
  }},
 
 {id:'perfscore',name:'수행평가 영역 만점 = 반영비율 점수',level:'warn',
@@ -692,15 +878,29 @@ const RULES=[
    return {st:'fail',msg:`평가 시기가 비어 있는 칸이 ${empty.length}개 있습니다`};
  }},
 
-{id:'grade5',name:'성취도 단계 표 (5단계와 3단계 중복)',level:'error',
+{id:'grade5',name:'성취도 평정 표 (해당하는 하나만 남기기)',level:'error',
  run(s){
+   // 2026 2학기 양식은 평정표가 5종이고 표기 방식이 서로 다르다.
+   //  3학년(2015)  : 90%이상~100%이하A / 80%이상~100%이하A / 40%이상P  ← 3종이 다 들어 있음
+   //  선택 5단계    : 90%이상A      (E = 60% 미만)
+   //  공통 5단계    : 90%이상A      (E = 40%이상~60%미만)
+   //  음미체 3단계  : 80%이상A      (C = 60% 미만)
+   //  과탐실 3단계  : 80%이상A      (C = 40%이상~60%미만)
+   // A 등급 행으로 판별해야 5종을 모두 잡는다.
    const t=s.text.replace(/\s/g,'');
-   const has5=/90%이상/.test(t)&&/40%이상~60%미만|60%미만/.test(t);
-   const has3=/80%이상~100%|80%이상~100/.test(t)&&/60%이상~80%미만/.test(t);
-   if(has5&&has3)
-     return {st:'fail',msg:'성취도 5단계 표와 3단계 표가 함께 남아 있습니다. 해당하는 하나만 작성합니다'};
-   if(!has5&&!has3) return {st:'unknown',msg:'기준 성취율 표를 찾지 못했습니다'};
-   return {st:'pass',msg:has5?'5단계 평정 표만 있습니다':'3단계 평정 표만 있습니다'};
+   const kinds=[];
+   if(/90%이상(?:~100%이하)?A/.test(t)) kinds.push('5단계(A~E)');
+   if(/80%이상(?:~100%이하)?A/.test(t)) kinds.push('3단계(A~C)');
+   if(/40%이상P/.test(t)&&/40%미만F/.test(t)) kinds.push('P·F');
+   const tags=t.match(/성취도\d단계평정[,，]?[가-힣·ㆍ]{0,12}/g)||[];
+   const det=tags.length?'양식 표지: '+tags.join(' / '):'';
+   if(!kinds.length)
+     return {st:'unknown',msg:'기준 성취율 표를 찾지 못했습니다',det};
+   if(kinds.length===1)
+     return {st:'pass',msg:`${kinds[0]} 평정 표만 있습니다`,det};
+   return {st:'fail',
+           msg:`성취도 평정 표가 ${kinds.length}종 남아 있습니다 (${kinds.join(', ')}). 해당하는 하나만 남기고 나머지는 삭제해야 합니다`,
+           det};
  }},
 
 {id:'cutscore',name:'분할점수 산출 방식 명시',level:'error',
@@ -890,6 +1090,166 @@ const RULES=[
    return {st:'pass',msg:`${termLabel} 배정 ${req.length}개 항목 모두 충족`,det:lines.join('\n')};
  }},
 
+{id:'taskform',name:'과제형·암기식 수행평가 (금지)',level:'warn',
+ run(s){
+   // 기준문서 p.66 "과제형 수행평가(암기식 수행평가 포함)를 배제하고 있는가?"
+   // 양식 원본의 금지 안내 문구는 TASK_BOILER 로 걸러낸다.
+   const pats=[
+     ['과제형',/과제\s*형/g],
+     ['암기·재현',/암기|외워\s*쓰기|그대로\s*재현/g],
+     ['수업 시간 외 수행',/가정에서\s*(?:수행|작성|제출)|수업\s*시간\s*외|방과\s*후\s*제출/g],
+     ['제출 기한',/기한\s*내에?\s*제출|제출\s*기한/g]
+   ];
+   const src=perfText(s);
+   if(!src.trim()) return {st:'unknown',msg:'수행평가 영역과 채점기준을 찾지 못했습니다'};
+   const hits=[];
+   for(const [n,re] of pats)
+     for(const m of src.matchAll(re)){
+       const w=src.slice(Math.max(0,m.index-80),m.index+80).replace(/\s+/g,' ').trim();
+       if(TASK_BOILER.some(b=>b.test(w))) continue;
+       hits.push(`${n} : … ${w} …`);
+     }
+   if(!hits.length) return {st:'pass',msg:'과제형이나 암기식으로 의심되는 표현이 없습니다'};
+   return {st:'fail',msg:`과제형 또는 암기식으로 읽힐 수 있는 표현이 ${hits.length}곳 있습니다`,
+           det:hits.slice(0,6).join('\n')};
+ }},
+
+{id:'basepct',name:'기본점수 범위 (영역 만점의 20~40%)',level:'warn',
+ run(s){
+   const ts=collectRubricTables(s);
+   if(!ts.length) return isRubricless(s)
+     ? {st:'skip',msg:'채점기준을 성취기준별 성취수준(A~E)으로 제시하는 양식이라 배점 검산 대상이 아닙니다'}
+     : {st:'unknown',msg:'채점기준표(배점 열)를 찾지 못했습니다'};
+   // 만점은 채점기준표를 더하지 말고 반영비율 표의 '영역 만점'을 쓴다.
+   // 채점기준표에는 영역의 일부 평가요소만 실린 경우가 있어 합계가 영역 만점과 다르다.
+   const R=s.ratio;
+   const areas=(R&&R.ok&&R.suAreas)?R.suAreas.filter(a=>a.score):[];
+   if(!areas.length) return {st:'unknown',msg:'반영비율 표에서 수행평가 영역 만점을 읽지 못했습니다'};
+   if(areas.length!==ts.length)
+     return {st:'unknown',
+             msg:`수행평가 영역 ${areas.length}개와 채점기준표 ${ts.length}개가 맞지 않아 기본점수를 대조하지 못했습니다`};
+   const det=[],bad=[];
+   ts.forEach((tb,i)=>{
+     const mx=areas[i].score, mn=tb.base;
+     if(mn===null||mn===undefined||!mx) return;
+     const nm=areas[i].name.replace(/\n/g,' ').slice(0,24);
+     const p=mn/mx*100;
+     det.push(`${nm} : 만점 ${round(mx)}점 / 기본점수 ${round(mn)}점 (${round(p)}%)`);
+     if(p<20||p>40) bad.push(`${nm} — 기본점수 ${round(mn)}점은 만점 ${round(mx)}점의 ${round(p)}%`);
+   });
+   if(!det.length) return {st:'unknown',msg:'채점기준표에서 기본점수 행을 찾지 못했습니다'};
+   if(!bad.length) return {st:'pass',msg:'기본점수가 모두 만점의 20~40% 안에 있습니다',det:det.join('\n')};
+   return {st:'fail',msg:`기본점수가 권장 범위(만점의 20~40%)를 벗어난 영역 ${bad.length}개`,
+           det:bad.concat('',det).join('\n')};
+ }},
+
+{id:'gapstep',name:'채점 배점의 급간 (동일 간격, 정수)',level:'warn',
+ run(s){
+   const ts=collectRubricTables(s);
+   if(!ts.length) return isRubricless(s)
+     ? {st:'skip',msg:'채점기준을 성취기준별 성취수준(A~E)으로 제시하는 양식이라 급간 검산 대상이 아닙니다'}
+     : {st:'unknown',msg:'채점기준표(배점 열)를 찾지 못했습니다'};
+   const det=[],bad=[];
+   for(const tb of ts) for(const g of tb.groups){
+     const v=[...new Set(g.scores)].sort((a,b)=>b-a);
+     const nm=g.name.slice(0,26);
+     if(v.length<3){ det.push(`${nm} : ${v.join(', ')}점 (단계가 적어 급간 판정 생략)`); continue; }
+     const d=[]; for(let i=0;i+1<v.length;i++) d.push(round(v[i]-v[i+1]));
+     det.push(`${nm} : ${v.join(', ')}점 → 급간 ${d.join(', ')}`);
+     if(!d.every(x=>Math.abs(x-d[0])<0.001)) bad.push(`${nm} — 급간이 일정하지 않습니다 (${d.join(', ')})`);
+     else if(Math.abs(d[0]-Math.round(d[0]))>0.001) bad.push(`${nm} — 급간이 정수가 아닙니다 (${d[0]})`);
+   }
+   if(!det.length) return {st:'unknown',msg:'배점을 읽지 못했습니다'};
+   if(!bad.length) return {st:'pass',msg:'채점 배점의 급간이 모두 일정하고 정수입니다',det:det.join('\n')};
+   return {st:'fail',msg:`급간이 규정과 다른 평가요소 ${bad.length}개`,det:bad.concat('',det).join('\n')};
+ }},
+
+{id:'subarea',name:'한 영역 30% 초과 시 세부 영역 2개 이상',level:'warn',
+ run(s){
+   const R=s.ratio;
+   if(!R||!R.ok||!R.suAreas||!R.suAreas.length) return {st:'unknown',msg:'수행평가 영역을 읽지 못했습니다'};
+   const over=[];
+   R.suAreas.forEach((a,i)=>{
+     const p=(R.areaScores||[]).filter(x=>x.c>=a.range[0]&&x.c<=a.range[1])
+              .reduce((t,x)=>t+(x.pct||0),0);
+     if(p>30) over.push({i,name:a.name.replace(/\n/g,' ').slice(0,30),pct:p,score:a.score});
+   });
+   if(!over.length) return {st:'pass',msg:'30%를 넘는 수행평가 영역이 없습니다'};
+   const ts=collectRubricTables(s);
+   // 채점기준표는 영역과 같은 순서로 실린다. 배점 합으로 짝지으면 안 맞는 경우가 있다.
+   const paired=(ts.length===R.suAreas.length);
+   const det=[],bad=[];let unknownAny=false;
+   for(const o of over){
+     const tb=paired?ts[o.i]:null;
+     const n=tb?tb.groups.length:null;
+     if(n===null) unknownAny=true;
+     det.push(`${o.name} — ${round(o.pct)}% / 세부 평가요소 ${n===null?'확인 못 함':n+'개'}`);
+     if(n!==null&&n<2) bad.push(o.name);
+   }
+   if(bad.length) return {st:'fail',msg:`30%를 넘는데 세부 평가요소가 1개인 영역 ${bad.length}개`,det:det.join('\n')};
+   if(unknownAny) return {st:'unknown',msg:'30%를 넘는 영역이 있으나 세부 평가요소 수를 확인하지 못했습니다',det:det.join('\n')};
+   return {st:'pass',msg:'30%를 넘는 영역이 모두 세부 평가요소 2개 이상입니다',det:det.join('\n')};
+ }},
+
+{id:'perftime',name:'수행평가 시기 (정기시험 1~2주 전 지양)',level:'warn',
+ run(s){
+   const R=s.ratio;
+   if(!R||!R.ok||!R.timeCells||!R.hasJG) return {st:'unknown',msg:'평가 시기 행 또는 정기시험 구간을 찾지 못했습니다'};
+   const week=t=>{
+     const a=(t||'').match(/(\d{1,2})\s*월\s*(\d)\s*주/);
+     if(a) return parseInt(a[1])*4+parseInt(a[2]);
+     const b=(t||'').match(/(\d{1,2})\s*[\/.]\s*(\d{1,2})/);
+     if(b) return parseInt(b[1])*4+Math.min(4,Math.max(1,Math.ceil(parseInt(b[2])/7)));
+     return null;
+   };
+   const pick=rng=>[...new Set(R.timeCells.filter(c=>c.c>=rng[0]&&c.c<=rng[1])
+                     .map(c=>week(c.text)).filter(v=>v!==null))];
+   const jg=pick(R.jgRange), su=pick(R.suRange);
+   if(!jg.length||!su.length)
+     return {st:'unknown',
+             msg:'평가 시기가 주 단위로 적혀 있지 않아(예: 4월~5월, 3월~6월) 정기시험과의 간격을 계산하지 못했습니다',
+             det:'정기시험 준비기간과 겹치지 않는지 직접 확인해 주세요'};
+   const lab=w=>`${Math.floor((w-1)/4)}월 ${((w-1)%4)+1}주`;  // w = 월*4 + 주 (주는 1~4)
+   const clash=[];
+   for(const u of su) for(const j of jg)
+     if(j-u>=0&&j-u<=2) clash.push(`수행평가 ${lab(u)} ↔ 정기시험 ${lab(j)}`);
+   const det=[`정기시험: ${jg.map(lab).join(', ')}`,`수행평가: ${su.map(lab).join(', ')}`];
+   if(!clash.length) return {st:'pass',msg:'수행평가가 정기시험 1~2주 전과 겹치지 않습니다',det:det.join('\n')};
+   return {st:'fail',msg:`수행평가가 정기시험 직전 2주 안에 있습니다 ${clash.length}건`,
+           det:[...new Set(clash)].concat('',det).join('\n')};
+ }},
+
+{id:'minlevelx',name:'선택과목에 최소 성취수준 진술 (넣지 않음)',level:'warn',
+ run(s){
+   if(/3\s*학년/.test(s.meta.grade||'')) return {st:'skip',msg:'2015 개정 적용 학년은 해당하지 않습니다'};
+   const nm=norm(s.meta.name);
+   if(COMMON.some(c=>norm(c)===nm||nm.startsWith(norm(c))))
+     return {st:'skip',msg:'공통과목은 최소 성취수준을 작성합니다'};
+   // 안내 문구가 아니라 '진술 표'가 실제로 들어 있는지 본다
+   const tabs=s.blocks.filter(b=>b.type==='tbl'&&/최소\s*성취수준/.test(b.tbl.all)&&
+                                 (/수행\s*특성/.test(b.tbl.all)||b.tbl.nr>=3));
+   if(!tabs.length) return {st:'pass',msg:'선택과목이며 최소 성취수준 진술 표가 없습니다'};
+   return {st:'fail',msg:`선택과목인데 최소 성취수준 진술 표가 ${tabs.length}개 있습니다. 1·2학년 선택과목은 작성하지 않습니다`};
+ }},
+
+{id:'elevel',name:'최저 성취도 구간 (공통 40%~60% · 선택 60% 미만)',level:'error',
+ run(s){
+   if(/3\s*학년/.test(s.meta.grade||'')) return {st:'skip',msg:'2015 개정 적용 학년은 해당하지 않습니다'};
+   const t=s.text.replace(/\s/g,'');
+   const has40=/40%이상~60%미만[A-E]/.test(t);
+   const has60=/(^|[^~])60%미만[A-E]/.test(t);
+   if(!has40&&!has60) return {st:'unknown',msg:'최저 성취도 구간을 찾지 못했습니다'};
+   const nm=norm(s.meta.name);
+   const isCommon=COMMON.some(c=>norm(c)===nm||nm.startsWith(norm(c)));
+   if(isCommon){
+     if(has40) return {st:'pass',msg:'공통과목: 최저 구간이 40% 이상~60% 미만입니다'};
+     return {st:'fail',msg:'공통과목인데 최저 구간이 60% 미만입니다. 최소 성취수준 보장 때문에 40% 이상~60% 미만이어야 합니다'};
+   }
+   if(has40&&!has60) return {st:'fail',msg:'선택과목인데 최저 구간이 40% 이상~60% 미만입니다. 선택과목은 60% 미만입니다'};
+   if(has60) return {st:'pass',msg:'선택과목: 최저 구간이 60% 미만입니다'};
+   return {st:'unknown',msg:'최저 성취도 구간을 판정하지 못했습니다'};
+ }},
+
 {id:'method',name:'평가 방법 표시',level:'warn',
  run(s){
    if(!/논술|구술|발표|토의|토론|프로젝트|실험|실습|포트폴리오/.test(s.text))
@@ -999,6 +1359,7 @@ function render(){
     <button onclick="openAll(true)">모두 펼치기</button>
     <button onclick="openAll(false)">모두 접기</button>
     <button onclick="copyReport()">수정 요청 문구 복사</button>
+    <button onclick="exportReply()">회신용 내보내기</button>
     <button onclick="window.print()">인쇄 / PDF</button>
   </div>
   <div class="note">
@@ -1056,6 +1417,85 @@ function count(s){
   return {err,warn,unk};
 }
 function openAll(v){ document.querySelectorAll('.subj').forEach(e=>e.classList.toggle('open',v)); }
+/* 규칙별로 메모를 붙일 기준 문구.
+   앞에서부터 찾아 처음 걸리는 자리에 붙인다. 다 못 찾으면 문서 맨 앞에 모아 붙인다. */
+/* '없습니다' 류의 지적은 그 낱말이 문서에 없어서 못 찾는다.
+   그래서 같은 절에 반드시 있는 문구를 뒤에 예비로 붙여 둔다. */
+const ANCHORS={
+  term:['반영비율','평가 종류'],
+  ratio100:['반영비율'],
+  sumin:['반영비율'],
+  areasum:['영역 만점','영역만점','반영비율'],
+  perfscore:['영역 만점','영역만점','반영비율'],
+  perfarea:['수행평가 영역','수행평가 세부','채점기준','수행평가'],
+  essay:['논술형','반영비율'],
+  essaymin:['논술형','반영비율'],
+  time:['평가 시기','시기'],
+  grade5:['기준 성취율','성취도'],
+  cutscore:['분할점수','기준 성취율','성취도'],
+  ai:['AI 활용','AI','유의 사항','유의사항'],
+  affect:['정의적','평가 방법','평가 종류'],
+  absent:['미응시','결시','성적 처리','성적처리','수행평가 세부'],
+  basepoint:['기본점수','채점기준','수행평가 세부'],
+  semlevel:['학기 단위 성취수준','성취수준','기준 성취율'],
+  minlevel:['최소 성취수준','성취수준','기준 성취율'],
+  rubric:['채점기준','수행 수준','수행평가 세부'],
+  levelstate:['성취수준','기준 성취율'],
+  codes:['성취기준'],
+  cross:['범교과','단원','교수·학습','교수학습'],
+  method:['평가 방법','평가방법'],
+  taskform:['평가요소','수행평가 세부','수행평가'],
+  basepct:['기본점수','배점','채점 기준','수행평가 세부'],
+  gapstep:['배점','채점 기준','수행평가 세부'],
+  subarea:['영역 만점','영역만점','반영비율'],
+  perftime:['평가 시기','시기'],
+  minlevelx:['최소 성취수준','성취수준'],
+  elevel:['기준 성취율','성취도'],
+  guide:[]     // 자리를 특정할 수 없어 문서 맨 앞
+};
+
+/* 회신용 내보내기 — 과목별 지적사항을 JSON 으로 저장한다.
+   이 파일을 평가계획_회신메모.bat 에 넣으면 각 hwpx 의 메모를 지우고
+   지적사항을 해당 자리에 [연구부] 메모로 넣어 준다. */
+function exportReply(){
+  if(!SUBJECTS.length){ alert('먼저 평가계획 파일을 넣어 주세요.'); return; }
+  const perFile={};
+  for(const s of SUBJECTS) perFile[s.fileName||''] = (perFile[s.fileName||'']||0)+1;
+  const 결과=[];
+  for(const s of SUBJECTS){
+    const 지적=[];
+    for(const r of s.results){
+      if(r.rule.id==='memo') continue;              // 어차피 회신 때 전부 지운다
+      if(r.st!=='fail' && r.st!=='unknown') continue;
+      지적.push({
+        id:r.rule.id,
+        규칙:r.rule.name,
+        수준:(r.st==='unknown') ? '확인' : (r.rule.level==='error' ? '수정' : '검토'),
+        메시지:r.msg,
+        상세:(r.det||'').split('\n').slice(0,8).join('\n'),
+        앵커:ANCHORS[r.rule.id]||[]
+      });
+    }
+    if(!지적.length) continue;
+    결과.push({
+      파일:s.fileName||'',
+      과목:s.meta.name||s.title,
+      학년:s.meta.grade||'',
+      파일내_과목수:perFile[s.fileName||'']||1,
+      지적
+    });
+  }
+  if(!결과.length){ alert('지적할 항목이 없습니다.'); return; }
+  const doc={만든곳:'평가계획 검토기', 과목수:결과.length,
+             총지적:결과.reduce((a,b)=>a+b.지적.length,0), 결과};
+  const blob=new Blob([JSON.stringify(doc,null,1)],{type:'application/json;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='회신메모_지시서.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+
 function copyReport(){
   const lines=[];
   for(const s of SUBJECTS){
