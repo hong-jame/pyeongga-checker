@@ -904,11 +904,16 @@ const RULES=[
    // A 등급 행으로 판별해야 5종을 모두 잡는다.
    const t=s.text.replace(/\s/g,'');
    const kinds=[];
-   if(/90%이상(?:~100%이하)?A/.test(t)) kinds.push('5단계(A~E)');
-   if(/80%이상(?:~100%이하)?A/.test(t)) kinds.push('3단계(A~C)');
+   // A등급 행의 끝은 실제 문서마다 세 가지로 쓴다: ~100%이하 / ~100% / ~100이하
+   // '이하'는 반드시 (?:이하)? 로 묶을 것. 이하? 로 쓰면 '이'가 필수가 되어 아무것도 안 잡힌다.
+   if(/90%이상(?:~100%?(?:이하)?)?A/.test(t)) kinds.push('5단계(A~E)');
+   if(/80%이상(?:~100%?(?:이하)?)?A/.test(t)) kinds.push('3단계(A~C)');
    if(/40%이상P/.test(t)&&/40%미만F/.test(t)) kinds.push('P·F');
    const tags=t.match(/성취도\d단계평정[,，]?[가-힣·ㆍ]{0,12}/g)||[];
    const det=tags.length?'양식 표지: '+tags.join(' / '):'';
+   // 교양 과목(논술 등)은 성취도를 매기지 않고 이수 여부만 기록한다. 평정표가 없는 것이 맞다.
+   if(!kinds.length&&/성취도표시는하지않고이수여부|이수여부\(P\)만을/.test(t))
+     return {st:'skip',msg:'교양 과목이라 성취도를 매기지 않습니다 (이수 여부 P만 기록)',det};
    if(!kinds.length)
      return {st:'unknown',msg:'기준 성취율 표를 찾지 못했습니다',det};
    if(kinds.length===1)
