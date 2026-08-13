@@ -95,10 +95,11 @@ textarea{width:100%;height:230px;font-family:Consolas,monospace;font-size:12.5px
   <div class="drop" id="drop">
     <b>여기에 hwpx 파일을 끌어다 놓으세요</b>
     <span>학년별 통합본, 과목별 개별 파일 모두 가능합니다 (여러 개 한꺼번에)</span>
-    <span style="display:block;margin-top:6px">범교과 시수 배분표(xlsx)를 같이 넣으면 시수까지 대조합니다</span>
-    <input type="file" id="file" accept=".hwpx,.xlsx" multiple hidden>
+    <span style="display:block;margin-top:6px">범교과 시수 배분표(xlsx)와 개설 과목 명단(json)을 같이 넣으면 시수와 미제출 과목까지 대조합니다</span>
+    <input type="file" id="file" accept=".hwpx,.xlsx,.json" multiple hidden>
   </div>
   <div class="hint" id="xlsStat">범교과 시수 배분표(xlsx)를 함께 넣으면 <b>범교과 시수 점검</b>도 실행됩니다.</div>
+  <div class="hint" id="planStat">개설 과목 명단(json)을 함께 넣으면 <b>미제출 과목</b>을 대조해 알려줍니다.</div>
   <div class="hint">
     한글 파일이 <code>.hwp</code>라면 한글에서 <b>다른 이름으로 저장 → 파일 형식을 한글 문서 (*.hwpx)</b>로 바꿔 저장한 뒤 넣어 주세요.
     hwp(바이너리)는 표 구조를 읽을 수 없어 검산이 되지 않습니다.
@@ -1313,6 +1314,56 @@ function review(subject){
    ============================================================ */
 const out=document.getElementById('out'), msg=document.getElementById('msg');
 let SUBJECTS=[], CROSS_PLAN=null, CROSS_NAME='', CROSS_TERM='auto';
+let OPEN_PLAN=null, OPEN_NAME='', GRADE_FILTER='all';
+
+/* 학년 판정 — 계획서의 학년 칸, 없으면 파일명이나 제목에서 찾는다 */
+function gradeOf(s){
+  const g=(s.meta.grade||'');
+  let m=g.match(/([1-3])\s*학년/)||g.match(/^\s*([1-3])\s*$/);
+  if(m) return m[1]+'학년';
+  m=(s.fileName||'').match(/([1-3])\s*학년/)||(s.title||'').match(/([1-3])\s*학년/);
+  return m?m[1]+'학년':'미확인';
+}
+
+/* 과목명 대조용 정규화.
+   편제표는 '언어와 매체'·'심화 국어', 계획서는 '언어와매체'·'심화국어' 처럼 띄어쓰기가 다르다.
+   로마숫자도 Ⅰ/Ⅱ 와 1/2 가 섞인다. */
+const ROMAN={'Ⅰ':'1','Ⅱ':'2','Ⅲ':'3','Ⅳ':'4'};
+const normSubj=t=>(t||'').replace(/[ⅠⅡⅢⅣ]/g,c=>ROMAN[c])
+                         .replace(/[\s ·ㆍ‧,\.\(\)\[\]]/g,'');
+/* 앞부분만 같다고 같은 과목으로 보면 안 된다.
+   '문학'과 '문학과영상', '중국어'와 '중국어회화'는 다른 과목이다.
+   끝의 번호 유무만 다른 경우('미적분'과 '미적분Ⅰ')에만 같게 본다.
+   양쪽에 번호가 다 있으면 정확히 같아야 한다('한국사1'과 '한국사2'는 다른 과목). */
+const subjMatch=(a,b)=>{
+  a=normSubj(a); b=normSubj(b);
+  if(!a||!b) return false;
+  if(a===b) return true;
+  const na=(a.match(/\d+$/)||[''])[0], nb=(b.match(/\d+$/)||[''])[0];
+  if(na&&nb) return false;
+  const sa=a.replace(/\d+$/,''), sb=b.replace(/\d+$/,'');
+  return sa===sb&&sa.length>=2;
+};
+
+/* 개설 과목 명단과 접수된 과목을 대조한다 */
+function missingReport(){
+  if(!OPEN_PLAN) return null;
+  const got={};
+  for(const s of SUBJECTS){ const g=gradeOf(s); (got[g]=got[g]||[]).push(s.meta.name||''); }
+  const rows=[];
+  for(const g of Object.keys(OPEN_PLAN)){
+    const list=OPEN_PLAN[g]||[], have=got[g]||[];
+    const miss=list.filter(n=>!have.some(h=>subjMatch(h,n)));
+    rows.push({학년:g, 개설:list.length, 접수:list.length-miss.length, 미제출:miss});
+  }
+  const extra=[];
+  for(const s of SUBJECTS){
+    const g=gradeOf(s), list=OPEN_PLAN[g]||[];
+    if(!list.length){ extra.push(`${g} · ${s.meta.name||s.fileName}`); continue; }
+    if(!list.some(n=>subjMatch(s.meta.name||'',n))) extra.push(`${g} · ${s.meta.name||s.fileName}`);
+  }
+  return {rows,extra};
+}
 // 어느 학기 편성시수를 기준으로 볼지
 function crossTerm(s){
   if(CROSS_TERM==='h1'||CROSS_TERM==='h2') return CROSS_TERM;
@@ -1336,6 +1387,7 @@ function render(){
     if(!c.err&&!c.warn) clean++;
   }
   const filter=document.getElementById('flt')?.value||'all';
+  const grades=[...new Set(SUBJECTS.map(gradeOf))].sort();
   let html=`
   <div class="sum">
     <div class="box"><div class="n">${SUBJECTS.length}</div><div class="l">검토한 과목</div></div>
@@ -1343,7 +1395,39 @@ function render(){
     <div class="box"><div class="n warn">${nW}</div><div class="l">경고</div></div>
     <div class="box"><div class="n unk">${nU}</div><div class="l">판정 불가</div></div>
     <div class="box"><div class="n ok">${clean}</div><div class="l">문제 없는 과목</div></div>
-  </div>
+  </div>`;
+
+  // 접수 현황 — 개설 과목 명단(json)을 넣었을 때만
+  const mr=missingReport();
+  if(mr){
+    const tot=mr.rows.reduce((a,r)=>({개설:a.개설+r.개설,접수:a.접수+r.접수,미:a.미+r.미제출.length}),{개설:0,접수:0,미:0});
+    html+=`<div style="margin:14px 0;padding:14px 16px;border:1px solid #d9dee8;border-radius:10px;background:#fbfcfe">
+      <div style="font-weight:700;margin-bottom:8px">접수 현황 <span style="font-weight:400;color:#8a93a5;font-size:.85em">기준: ${esc(OPEN_NAME)}</span></div>
+      <table style="border-collapse:collapse;font-size:.92em">
+        <tr style="color:#6b7684"><th style="text-align:left;padding:3px 16px 3px 0">학년</th>
+          <th style="text-align:right;padding:3px 16px 3px 0">개설</th>
+          <th style="text-align:right;padding:3px 16px 3px 0">접수</th>
+          <th style="text-align:right;padding:3px 16px 3px 0">미제출</th></tr>`;
+    for(const r of mr.rows)
+      html+=`<tr><td style="padding:3px 16px 3px 0">${esc(r.학년)}</td>
+        <td style="text-align:right;padding:3px 16px 3px 0">${r.개설}</td>
+        <td style="text-align:right;padding:3px 16px 3px 0">${r.접수}</td>
+        <td style="text-align:right;padding:3px 16px 3px 0;font-weight:${r.미제출.length?'700':'400'};color:${r.미제출.length?'#c0392b':'#1e7d5a'}">${r.미제출.length}</td></tr>`;
+    html+=`<tr style="border-top:1px solid #d9dee8;font-weight:700"><td style="padding:5px 16px 3px 0">합계</td>
+        <td style="text-align:right;padding:5px 16px 3px 0">${tot.개설}</td>
+        <td style="text-align:right;padding:5px 16px 3px 0">${tot.접수}</td>
+        <td style="text-align:right;padding:5px 16px 3px 0;color:${tot.미?'#c0392b':'#1e7d5a'}">${tot.미}</td></tr></table>`;
+    for(const r of mr.rows) if(r.미제출.length)
+      html+=`<div style="margin-top:8px"><b>${esc(r.학년)} 미제출 ${r.미제출.length}과목</b>
+        <div style="color:#c0392b;margin-top:2px">${r.미제출.map(esc).join(' · ')}</div></div>`;
+    if(mr.extra.length)
+      html+=`<div style="margin-top:10px;color:#8a6d1f"><b>명단에 없는 과목이 들어왔습니다 (${mr.extra.length})</b>
+        <div style="margin-top:2px">${mr.extra.map(esc).join(' · ')}</div>
+        <div style="color:#8a93a5;font-size:.88em;margin-top:2px">과목명 표기가 다르거나, 명단에 없는 과목이 개설된 경우입니다. 명단 파일을 고치면 됩니다.</div></div>`;
+    html+=`</div>`;
+  }
+
+  html+=`
   <div class="bar">
     <select id="flt">
       <option value="all">전체 과목</option>
@@ -1351,6 +1435,10 @@ function render(){
       <option value="warn">오류 또는 경고가 있는 과목만</option>
       <option value="unk">판정 불가가 있는 과목만</option>
     </select>
+    ${grades.length>1?`<select id="gsel">
+      <option value="all">전체 학년</option>
+      ${grades.map(g=>`<option value="${esc(g)}">${esc(g)}만</option>`).join('')}
+    </select>`:''}
     ${CROSS_PLAN?`<select id="term">
       <option value="auto">범교과 기준: 계획서 학기 따름</option>
       <option value="h1">범교과 기준: 1학기 편성시수</option>
@@ -1367,11 +1455,23 @@ function render(){
     성취기준 원문과의 대조(임의 변경 여부)와 채점기준의 구체성은 자동 판정 대상이 아닙니다.
   </div>`;
 
-  for(const [i,s] of SUBJECTS.entries()){
+  // 학년별로 묶고, 학년 안에서는 파일에 실린 순서를 지킨다
+  const order=SUBJECTS.map((s,i)=>({s,i,g:gradeOf(s)}))
+    .sort((a,b)=>a.g===b.g?a.i-b.i:(a.g<b.g?-1:1));
+  let curG=null, shown=0;
+  for(const {s,i,g} of order){
     const c=s._c;
+    if(GRADE_FILTER!=='all'&&g!==GRADE_FILTER) continue;
     if(filter==='err'&&!c.err) continue;
     if(filter==='warn'&&!c.err&&!c.warn) continue;
     if(filter==='unk'&&!c.unk) continue;
+    if(g!==curG){
+      curG=g;
+      const n=order.filter(o=>o.g===g).length;
+      html+=`<div style="margin:20px 0 8px;padding-bottom:5px;border-bottom:2px solid #e3e7ef;font-weight:700;font-size:1.05em">
+        ${esc(g)} <span style="font-weight:400;color:#8a93a5;font-size:.85em">${n}과목</span></div>`;
+    }
+    shown++;
     const badges=[];
     if(c.err) badges.push(`<span class="badge b-err">오류 ${c.err}</span>`);
     if(c.warn) badges.push(`<span class="badge b-warn">경고 ${c.warn}</span>`);
@@ -1396,8 +1496,11 @@ function render(){
     }
     html+=`</div></div>`;
   }
+  if(!shown) html+=`<div class="empty">조건에 맞는 과목이 없습니다.</div>`;
   out.innerHTML=html;
   const f=document.getElementById('flt'); if(f){ f.value=filter; f.onchange=render; }
+  const gs=document.getElementById('gsel');
+  if(gs){ gs.value=GRADE_FILTER; gs.onchange=()=>{ GRADE_FILTER=gs.value; render(); }; }
   const t=document.getElementById('term');
   if(t){ t.value=CROSS_TERM; t.onchange=()=>{ CROSS_TERM=t.value; SUBJECTS.forEach(rerunCross); render(); }; }
 }
@@ -1530,8 +1633,19 @@ async function handle(files){
       msg.textContent=`배분표 읽기 실패 (${f.name}) : ${e.message}`;
     }
   }
-  const docs=[...files].filter(f=>!/\.xlsx$/i.test(f.name));
-  if(!docs.length && CROSS_PLAN){ crossStatus(); render(); return; }
+  // 개설 과목 명단(json) — 넣으면 미제출 과목을 대조해 알려준다
+  for(const f of files){
+    if(!/\.json$/i.test(f.name)) continue;
+    try{
+      const j=JSON.parse(await f.text());
+      if(j&&j.과목&&typeof j.과목==='object'){ OPEN_PLAN=j.과목; OPEN_NAME=f.name; }
+      else msg.textContent=`${f.name} 에 '과목' 항목이 없어 개설 명단으로 읽지 못했습니다.`;
+    }catch(e){
+      msg.textContent=`개설 명단 읽기 실패 (${f.name}) : ${e.message}`;
+    }
+  }
+  const docs=[...files].filter(f=>!/\.(xlsx|json)$/i.test(f.name));
+  if(!docs.length && (CROSS_PLAN||OPEN_PLAN)){ crossStatus(); render(); return; }
   for(const f of docs){
     if(!/\.hwpx$/i.test(f.name)){
       msg.textContent=`${f.name} 은 hwpx가 아닙니다. 한글에서 hwpx로 저장한 뒤 다시 넣어 주세요.`;
@@ -1559,7 +1673,21 @@ async function handle(files){
   render();
 }
 
+function planStatus(){
+  const el=document.getElementById('planStat');
+  if(!el) return;
+  if(!OPEN_PLAN){
+    el.innerHTML='개설 과목 명단(json)을 함께 넣으면 <b>미제출 과목</b>을 대조해 알려줍니다.';
+    el.style.color='#8a93a5';
+    return;
+  }
+  const n=Object.entries(OPEN_PLAN).map(([g,v])=>`${g} ${v.length}`).join(' · ');
+  el.innerHTML=`개설 명단 <b>${esc(OPEN_NAME)}</b> — ${esc(n)}과목`;
+  el.style.color='#1e7d5a';
+}
+
 function crossStatus(){
+  planStatus();
   const el=document.getElementById('xlsStat');
   if(!el) return;
   if(!CROSS_PLAN){
