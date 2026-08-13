@@ -1206,31 +1206,90 @@ const RULES=[
    return {st:'pass',msg:'30%를 넘는 영역이 모두 세부 평가요소 2개 이상입니다',det:det.join('\n')};
  }},
 
-{id:'perftime',name:'수행평가 시기 (정기시험 1~2주 전 지양)',level:'warn',
+{id:'examdate',name:'정기시험 시기가 학사일정과 맞는지',level:'error',
+ run(s){
+   if(!CAL) return {st:'skip',msg:'학사일정(json)을 넣으면 점검합니다'};
+   const R=s.ratio;
+   if(!R||!R.ok) return {st:'unknown',msg:'반영비율 표를 읽지 못했습니다'};
+   if(!R.hasJG) return {st:'skip',msg:'정기시험이 없는 과목입니다'};
+   if(!R.timeCells) return {st:'unknown',msg:'평가 시기 행을 찾지 못했습니다'};
+   const g=gradeOf(s);
+   const exams=(CAL.정기고사||[]).filter(e=>!(e.대상||[]).length||e.대상.includes(g));
+   if(!exams.length)
+     return {st:'fail',msg:`학사일정에 ${g} 정기고사가 없는데 계획서에는 정기시험이 있습니다`};
+   const said=[...new Set(R.timeCells.filter(c=>c.c>=R.jgRange[0]&&c.c<=R.jgRange[1])
+                 .map(c=>(c.text||'').replace(/\s/g,'')).filter(Boolean))];
+   const parsed=said.map(x=>({raw:x,t:timeToDate(x,CAL)})).filter(x=>x.t);
+   const calLab=e=>{const w=weekOfMonth(e.시작);return `${e.회차} ${e.시작}~${e.끝} (${w.m}월 ${w.w}주)`;};
+   const det=[`계획서: ${said.join(' / ')||'(비어 있음)'}`,
+              `학사일정: ${exams.map(calLab).join(' / ')}`];
+   if(!parsed.length)
+     return {st:'unknown',msg:'정기시험 시기를 월·주나 날짜로 읽지 못했습니다',det:det.join('\n')};
+   // 주차 표기는 학교마다 관행이 다르다. 실제 1학기 제출본을 보면 2차 정기고사(6/29~7/3,
+   // 달력상 6월 5주)를 43과목 중 33과목이 '6월 4주'로 적었다. 그 달 마지막 주를 4주로
+   // 쓰는 습관이다. 그래서 주차는 ±1 까지 같게 보고, 어긋난 '달'만 잡는다.
+   // 지난 학기 날짜가 남은 경우(2학기 계획서에 4월/6월)는 달이 다르므로 그대로 걸린다.
+   const hit=p=>exams.some(e=>{
+     const a=new Date(e.시작+'T00:00:00'), b=new Date(e.끝+'T00:00:00');
+     if(p.t.kind==='date') return p.t.d>=+a-DAY && p.t.d<=+b+DAY;
+     const w=weekOfMonth(e.시작), w2=weekOfMonth(e.끝);
+     return (p.t.m===w.m && Math.abs(p.t.w-w.w)<=1)
+         || (p.t.m===w2.m && Math.abs(p.t.w-w2.w)<=1);   // 시험이 달을 걸치는 경우
+   });
+   const bad=parsed.filter(p=>!hit(p));
+   if(bad.length)
+     return {st:'fail',
+             msg:`정기시험 시기가 학사일정과 맞지 않습니다 — ${bad.map(b=>b.raw).join(', ')}`,
+             det:det.concat('','지난 학기 계획서를 복사하면 시험 날짜가 그대로 남습니다').join('\n')};
+   if(parsed.length>exams.length)
+     return {st:'fail',
+             msg:`${g} 2학기 정기고사는 ${exams.length}회인데 계획서에는 시기가 ${parsed.length}개 있습니다`,
+             det:det.join('\n')};
+   return {st:'pass',msg:`정기시험 시기가 학사일정과 맞습니다 (${parsed.length}회)`,det:det.join('\n')};
+ }},
+
+{id:'perftime',name:'수행평가 시기 (정기고사 1~2주 전 지양)',level:'warn',
  run(s){
    const R=s.ratio;
-   if(!R||!R.ok||!R.timeCells||!R.hasJG) return {st:'unknown',msg:'평가 시기 행 또는 정기시험 구간을 찾지 못했습니다'};
-   const week=t=>{
-     const a=(t||'').match(/(\d{1,2})\s*월\s*(\d)\s*주/);
-     if(a) return parseInt(a[1])*4+parseInt(a[2]);
-     const b=(t||'').match(/(\d{1,2})\s*[\/.]\s*(\d{1,2})/);
-     if(b) return parseInt(b[1])*4+Math.min(4,Math.max(1,Math.ceil(parseInt(b[2])/7)));
-     return null;
-   };
-   const pick=rng=>[...new Set(R.timeCells.filter(c=>c.c>=rng[0]&&c.c<=rng[1])
-                     .map(c=>week(c.text)).filter(v=>v!==null))];
-   const jg=pick(R.jgRange), su=pick(R.suRange);
-   if(!jg.length||!su.length)
+   if(!R||!R.ok||!R.timeCells) return {st:'unknown',msg:'평가 시기 행을 찾지 못했습니다'};
+   const su=[...new Set(R.timeCells.filter(c=>c.c>=R.suRange[0]&&c.c<=R.suRange[1])
+               .map(c=>(c.text||'').replace(/\s/g,'')).filter(Boolean))]
+             .map(x=>({raw:x,t:timeToDate(x,CAL)})).filter(x=>x.t);
+   if(!su.length)
      return {st:'unknown',
-             msg:'평가 시기가 주 단위로 적혀 있지 않아(예: 4월~5월, 3월~6월) 정기시험과의 간격을 계산하지 못했습니다',
-             det:'정기시험 준비기간과 겹치지 않는지 직접 확인해 주세요'};
-   const lab=w=>`${Math.floor((w-1)/4)}월 ${((w-1)%4)+1}주`;  // w = 월*4 + 주 (주는 1~4)
+             msg:'수행평가 시기가 주 단위로 적혀 있지 않아(예: 4월~5월) 정기고사와의 간격을 계산하지 못했습니다',
+             det:'정기고사 준비기간과 겹치지 않는지 직접 확인해 주세요'};
+   // 정기고사 기준은 학사일정이 우선이다.
+   // 학사일정을 쓰면 수행평가 100% 과목도 검사할 수 있다(계획서에 정기시험이 없어도 학교 시험은 있으므로).
+   const g=gradeOf(s);
+   let exams=[], src='';
+   if(CAL){
+     exams=(CAL.정기고사||[]).filter(e=>!(e.대상||[]).length||e.대상.includes(g))
+             .map(e=>({lab:`${e.회차}(${e.시작})`,d:new Date(e.시작+'T00:00:00')}));
+     src='학사일정';
+   }
+   if(!exams.length&&R.hasJG){
+     exams=[...new Set(R.timeCells.filter(c=>c.c>=R.jgRange[0]&&c.c<=R.jgRange[1])
+              .map(c=>(c.text||'').replace(/\s/g,'')).filter(Boolean))]
+            .map(x=>({raw:x,t:timeToDate(x,CAL)})).filter(x=>x.t)
+            .map(x=>({lab:x.raw,d:x.t.d}));
+     src='계획서에 적힌 정기시험';
+   }
+   if(!exams.length)
+     return {st:'unknown',msg:'견줄 정기고사 시기를 찾지 못했습니다 (학사일정 json을 넣으면 검사합니다)'};
+   const fmt=d=>`${d.getMonth()+1}/${d.getDate()}`;
    const clash=[];
-   for(const u of su) for(const j of jg)
-     if(j-u>=0&&j-u<=2) clash.push(`수행평가 ${lab(u)} ↔ 정기시험 ${lab(j)}`);
-   const det=[`정기시험: ${jg.map(lab).join(', ')}`,`수행평가: ${su.map(lab).join(', ')}`];
-   if(!clash.length) return {st:'pass',msg:'수행평가가 정기시험 1~2주 전과 겹치지 않습니다',det:det.join('\n')};
-   return {st:'fail',msg:`수행평가가 정기시험 직전 2주 안에 있습니다 ${clash.length}건`,
+   for(const u of su) for(const e of exams){
+     const diff=Math.round((e.d-u.t.d)/DAY);
+     if(diff>=0&&diff<21)
+       clash.push(`수행평가 ${u.raw} → 정기고사 ${e.lab} 까지 ${Math.floor(diff/7)}주`);
+   }
+   const det=[`기준: ${src}`,
+              `정기고사: ${exams.map(e=>e.lab).join(', ')}`,
+              `수행평가: ${su.map(u=>`${u.raw}(${fmt(u.t.d)}~)`).join(', ')}`];
+   if(!clash.length)
+     return {st:'pass',msg:'수행평가가 정기고사 직전 2주와 겹치지 않습니다',det:det.join('\n')};
+   return {st:'fail',msg:`수행평가가 정기고사 직전 2주 안에 있습니다 ${clash.length}건`,
            det:[...new Set(clash)].concat('',det).join('\n')};
  }},
 
@@ -1487,6 +1546,40 @@ function review(subject){
 const out=document.getElementById('out'), msg=document.getElementById('msg');
 let SUBJECTS=[], CROSS_PLAN=null, CROSS_NAME='', CROSS_TERM='auto';
 let OPEN_PLAN=null, OPEN_NAME='', GRADE_FILTER='all';
+let CAL=null, CAL_NAME='';     // 학사일정 (정기고사 기간 등)
+
+/* 계획서는 시기를 '10월 3주' 또는 '10/12~10/16' 으로 쓴다.
+   학사일정은 날짜로 적혀 있으니 서로 견주려면 한쪽으로 맞춰야 한다.
+   주차는 그 달 1일이 무슨 요일인지에 따라 갈리므로 달력대로 센다.
+     2026-10-01 은 목요일 → 10/12 는 (12+4)/7 올림 = 3주차
+     2026-12-01 은 화요일 → 12/7  은 (7+2)/7  올림 = 2주차 */
+function weekOfMonth(iso){
+  const dt=new Date(iso+'T00:00:00');
+  const first=new Date(dt.getFullYear(),dt.getMonth(),1);
+  return {y:dt.getFullYear(), m:dt.getMonth()+1,
+          w:Math.ceil((dt.getDate()+first.getDay())/7), d:dt};
+}
+/* '10월 4주' → 그 주 일요일 날짜 */
+function weekStart(year,month,week){
+  const first=new Date(year,month-1,1);
+  const day=(week-1)*7-first.getDay()+1;
+  return new Date(year,month-1,day);
+}
+const DAY=86400000;
+
+/* 평가 시기 칸을 날짜로 바꾼다. '10월 3주' · '10/12~10/16' · '10.12' 를 받는다.
+   2학기는 8월에서 다음 해 1월까지이므로 1~2월은 다음 해로 본다. */
+function timeToDate(txt,cal){
+  const base=+((cal&&cal.학년도)||new Date().getFullYear());
+  const t=(txt||'').replace(/\s/g,'');
+  let m=t.match(/(\d{1,2})월(\d)주/);
+  if(m){ const mo=+m[1], y=mo<=2?base+1:base;
+         return {kind:'week',m:mo,w:+m[2],d:weekStart(y,mo,+m[2])}; }
+  m=t.match(/(\d{1,2})\s*[\/.]\s*(\d{1,2})/);
+  if(m){ const mo=+m[1], y=mo<=2?base+1:base;
+         return {kind:'date',m:mo,d:new Date(y,mo-1,+m[2])}; }
+  return null;
+}
 
 /* 학년 판정 — 계획서의 학년 칸, 없으면 파일명이나 제목에서 찾는다 */
 function gradeOf(s){
@@ -1724,6 +1817,7 @@ const ANCHORS={
   gapstep:['배점','채점 기준','수행평가 세부'],
   subarea:['영역 만점','영역만점','반영비율'],
   perftime:['평가 시기','시기'],
+  examdate:['평가 시기','시기','정기시험'],
   minlevelx:['최소 성취수준','성취수준'],
   elevel:['기준 성취율','성취도'],
   levelmatch:['기준 성취율','성취기준별 성취수준','성취도'],
@@ -1815,7 +1909,8 @@ async function handle(files){
     try{
       const j=JSON.parse(await f.text());
       if(j&&j.과목&&typeof j.과목==='object'){ OPEN_PLAN=j.과목; OPEN_NAME=f.name; }
-      else msg.textContent=`${f.name} 에 '과목' 항목이 없어 개설 명단으로 읽지 못했습니다.`;
+      else if(j&&Array.isArray(j.정기고사)){ CAL=j; CAL_NAME=f.name; }
+      else msg.textContent=`${f.name} 에 '과목'이나 '정기고사' 항목이 없어 읽지 못했습니다.`;
     }catch(e){
       msg.textContent=`개설 명단 읽기 실패 (${f.name}) : ${e.message}`;
     }
@@ -1852,13 +1947,22 @@ async function handle(files){
 function planStatus(){
   const el=document.getElementById('planStat');
   if(!el) return;
-  if(!OPEN_PLAN){
-    el.innerHTML='개설 과목 명단(json)을 함께 넣으면 <b>미제출 과목</b>을 대조해 알려줍니다.';
+  const bits=[];
+  if(OPEN_PLAN){
+    const n=Object.entries(OPEN_PLAN).map(([g,v])=>`${g} ${v.length}`).join(' · ');
+    bits.push(`개설 명단 <b>${esc(OPEN_NAME)}</b> — ${esc(n)}과목`);
+  }
+  if(CAL){
+    const e=(CAL.정기고사||[]).map(x=>`${x.회차} ${x.시작}~${x.끝}`).join(' · ');
+    bits.push(`학사일정 <b>${esc(CAL_NAME)}</b> — 정기고사 ${esc(e)}`);
+  }
+  if(!bits.length){
+    el.innerHTML='개설 과목 명단(json)을 넣으면 <b>미제출 과목</b>을, '+
+                 '학사일정(json)을 넣으면 <b>정기고사 시기</b>를 대조합니다.';
     el.style.color='#8a93a5';
     return;
   }
-  const n=Object.entries(OPEN_PLAN).map(([g,v])=>`${g} ${v.length}`).join(' · ');
-  el.innerHTML=`개설 명단 <b>${esc(OPEN_NAME)}</b> — ${esc(n)}과목`;
+  el.innerHTML=bits.join('<br>');
   el.style.color='#1e7d5a';
 }
 
