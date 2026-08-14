@@ -1065,7 +1065,7 @@ const RULES=[
    return {st:'pass',msg:`평가계획 성취기준이 모두 운영계획에 있습니다 (${evalCodes.size}개)`,det:det.join('\n')};
  }},
 
-{id:'cross',name:'범교과 학습 주제 시수',level:'error',
+{id:'cross',name:'범교과 학습 주제 시수 (최소 기준)',level:'warn',
  run(s){
    if(!CROSS_PLAN) return {st:'skip',msg:'범교과 시수 배분표(xlsx)를 넣으면 점검합니다'};
    const term=crossTerm(s);
@@ -1101,12 +1101,19 @@ const RULES=[
    if(extra.length) lines.push('', '배분표에 없는 표기: '+[...new Set(extra.map(e=>e.raw))].join(' · '));
 
    const termLabel=term==='h1'?'1학기':'2학기';
+   // 2026-08-14 교육과정부 확인: 배분표 시수는 최소 기준이다.
+   //   · 기준보다 많이 편성한 것은 문제가 아니다 (예전엔 '초과'를 오류로 찍었다 — 잘못이었다)
+   //   · 1학기 배정을 그대로 써도 된다 (1학기가 대체로 양이 많다)
+   //   · 누락도 반드시 고쳐야 하는 사항은 아니다
+   // 그래서 판정을 경고로 낮추고, 회신 지시서에서는 뺀다(연구부 화면 전용). exportReply 참고.
    if(miss.length||short.length)
      return {st:'fail',
-             msg:`${termLabel} 기준 ${req.length}개 중 누락 ${miss.length}개, 부족 ${short.length}개`,
+             msg:`${termLabel} 배정 ${req.length}개 중 누락 ${miss.length}개, 기준 미달 ${short.length}개 (최소 기준이라 필수 수정은 아님)`,
              det:lines.join('\n')};
    if(over.length)
-     return {st:'fail',msg:`기준보다 많이 편성된 항목 ${over.length}개`,det:lines.join('\n')};
+     return {st:'pass',
+             msg:`${termLabel} 배정 ${req.length}개 모두 충족 (그중 ${over.length}개는 기준보다 많음 — 문제 없음)`,
+             det:lines.join('\n')};
    return {st:'pass',msg:`${termLabel} 배정 ${req.length}개 항목 모두 충족`,det:lines.join('\n')};
  }},
 
@@ -1844,6 +1851,8 @@ function exportReply(){
     const 지적=[];
     for(const r of s.results){
       if(r.rule.id==='memo') continue;              // 어차피 회신 때 전부 지운다
+      if(r.rule.id==='cross') continue;             // 범교과는 최소 기준이라 교사에게 보낼 지적이 아니다
+                                                    // (2026-08-14 교육과정부 확인). 연구부 화면에서만 본다
       if(r.st!=='fail' && r.st!=='unknown') continue;
       지적.push({
         id:r.rule.id,
