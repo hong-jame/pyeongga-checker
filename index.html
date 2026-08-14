@@ -229,7 +229,7 @@ function buildCrossPlan(cells){
 }
 
 // 과목명 비교용 정규화
-const nrm=s=>(s||'').replace(/[\s·․．.,()\[\]\/·]/g,'');
+const nrm=s=>deRoman(s).replace(/[\s·․．.,()\[\]\/·]/g,'');
 function crossSubjMatch(planName, entry){
   if(entry.subjects.some(s=>/전교과|전\s*교과/.test(s))) return true;
   const a=nrm(planName);
@@ -559,7 +559,9 @@ function parseRatio(tbl){
 const COMMON=['공통국어1','공통국어2','공통수학1','공통수학2','공통영어1','공통영어2',
   '통합사회1','통합사회2','통합과학1','통합과학2','과학탐구실험1','과학탐구실험2','한국사1','한국사2'];
 // 2015 개정 [12언매01-01] 과 2022 개정 [10통과1-01-01] 두 형식을 모두 인식
-const RE_CODE=/(\d{1,2}[가-힣A-Za-z]{1,10}\d{0,2}(?:-\d{2}){1,2})/g;
+// 2026-08-14: 약칭에 로마숫자가 들어가고 뒤에 하이픈이 하나 더 붙는 형태도 나온다
+//   [12영Ⅱ-01-01] (영어Ⅱ) · [12중Ⅱ-05-01] (중국어Ⅱ)
+const RE_CODE=/(\d{1,2}[가-힣A-Za-zⅠⅡⅢⅣⅤ]{1,10}-?\d{0,2}(?:-\d{2}){1,2})/g;
 
 /* ---- 2026 2학기 양식 대응 보조 ----
    양식 5종(3학년 / 1·2학년 선택 음미체·음미체제외 / 1학년 공통 국수영한사과·과탐실)을
@@ -1389,21 +1391,27 @@ const RULES=[
    // 성취기준 코드의 한글 약칭은 과목마다 정해져 있다.
    //   미술 [12미01-01] · 미술창작 [12미창02-01] · 음악 [12음01-01]
    // 한 계획서에 두 과목 약칭이 섞여 있으면 다른 과목 계획서를 베껴 온 흔적이다.
-   const re=/\[\s*(\d{2})\s*([가-힣]{1,6}?)\s*(\d{1,2})\s*-\s*(\d{2})/g;
-   const found={};
+   // 한 문서 안에서도 표기가 제각각이다(2026-08-14 접수분에서 확인).
+   //   [12영Ⅱ01-01] · [12영 Ⅱ-01-01] · [12영II-01-01]  ← 셋 다 같은 과목이다
+   // 그래서 약칭을 뽑은 뒤 로마숫자를 숫자로 바꿔(deRoman) 같은 것끼리 묶는다.
+   // 안 그러면 표기만 다른 것을 '섞였다'고 잘못 잡는다.
+   const re=/\[\s*(\d{2})\s*([가-힣][가-힣ⅠⅡⅢⅣⅤI\s]{0,5}?)\s*-?\s*(\d{1,2})\s*-\s*(\d{2})/g;
+   const found={}, shown={};
    for(const m of s.text.matchAll(re)){
-     const ab=m[2];
-     (found[ab]=found[ab]||[]).push(`[${m[1]}${ab}${m[3]}-${m[4]}]`);
+     const raw=m[2].replace(/\s/g,'');
+     const key=deRoman(raw);                    // 영Ⅱ · 영II → 영2
+     (found[key]=found[key]||[]).push(`[${m[1]}${raw}${m[3]}-${m[4]}]`);
+     shown[key]=shown[key]||raw;                // 사람에게 보여줄 때는 원래 표기로
    }
    const abbrs=Object.keys(found);
    if(!abbrs.length) return {st:'unknown',msg:'성취기준 코드를 찾지 못했습니다'};
 
-   const det=abbrs.map(a=>`${a} : ${found[a].length}개  ${[...new Set(found[a])].slice(0,4).join(' ')}`).join('\n');
+   const det=abbrs.map(a=>`${shown[a]} : ${found[a].length}개  ${[...new Set(found[a])].slice(0,4).join(' ')}`).join('\n');
    if(abbrs.length>1){
      const main=abbrs.slice().sort((a,b)=>found[b].length-found[a].length)[0];
      const others=abbrs.filter(a=>a!==main);
      return {st:'fail',
-             msg:`성취기준이 서로 다른 과목 것으로 섞여 있습니다 — 주로 '${main}'인데 '${others.join("', '")}'가 함께 있습니다`,
+             msg:`성취기준이 서로 다른 과목 것으로 섞여 있습니다 — 주로 '${shown[main]}'인데 '${others.map(o=>shown[o]).join("', '")}'가 함께 있습니다`,
              det};
    }
    // 과목명과 약칭을 맞춰 보는 검사는 넣지 않았다.
@@ -1531,6 +1539,34 @@ function collectPerfDetails(s){
       }
     }
   }
+
+  /* 1·2학년(2022 개정) 양식은 '수행평가 영역: 이름(30점)' 이라고 쓰지 않는다.
+     세부기준 표 머리 행이 이렇게 생겼다.
+       평가영역명 | 평가영역명 | 예술가곡 가창 | … | 영역만점 | 30점 | … | 학기 | 1
+     3학년 방식(텍스트 패턴)만 보던 예전 코드는 이 표를 통째로 못 봤고,
+     그래서 1·2학년 과목마다 '세부기준을 찾지 못했습니다' 가 떴다(2026-08-14 실제 접수분에서 확인).
+     배점 열이 없다고 세부기준이 없는 것이 아니다. 2022 개정은 성취수준 서술로 쓴다. */
+  for(const b of s.blocks){
+    if(b.type!=='tbl') continue;
+    const row=(b.tbl.filled[0]||[]).map(c=>(c||'').replace(/\s+/g,' ').trim());
+    const flat=row.map(c=>c.replace(/\s/g,''));
+    const ai=flat.indexOf('평가영역명');
+    if(ai<0) continue;
+    const after=i=>{                       // 병합으로 같은 글자가 반복되니 다음 '다른 값'을 찾는다
+      for(let k=i+1;k<row.length;k++)
+        if(row[k] && flat[k]!==flat[i]) return row[k];
+      return '';
+    };
+    const nm=after(ai);
+    if(!nm || nm.length>50) continue;
+    let sc=null;
+    const mi=flat.indexOf('영역만점');
+    if(mi>=0){
+      const mm=(after(mi)||'').match(/(\d+(?:\.\d+)?)/);
+      if(mm) sc=parseFloat(mm[1]);
+    }
+    if(!out.some(o=>norm(o.name)===norm(nm))) out.push({name:nm,score:sc});
+  }
   return out;
 }
 
@@ -1605,9 +1641,16 @@ function gradeOf(s){
 /* 과목명 대조용 정규화.
    편제표는 '언어와 매체'·'심화 국어', 계획서는 '언어와매체'·'심화국어' 처럼 띄어쓰기가 다르다.
    로마숫자도 Ⅰ/Ⅱ 와 1/2 가 섞인다. */
-const ROMAN={'Ⅰ':'1','Ⅱ':'2','Ⅲ':'3','Ⅳ':'4'};
-const normSubj=t=>(t||'').replace(/[ⅠⅡⅢⅣ]/g,c=>ROMAN[c])
-                         .replace(/[\s ·ㆍ‧,\.\(\)\[\]]/g,'');
+const ROMAN={'Ⅰ':'1','Ⅱ':'2','Ⅲ':'3','Ⅳ':'4','Ⅴ':'5'};
+/* 로마숫자를 진짜 로마숫자 글자로 안 쓰고 영문 대문자 I 로 치는 교사가 있다.
+   2026-08-14 접수분에서 실제로 나왔다 — 계획서는 '영어II', 편제표와 배분표는 '영어Ⅱ'.
+   그대로 두면 같은 과목이 '명단에 없는 과목'과 '미제출'로 동시에 잡히고,
+   범교과 배정도 못 찾는다. 한글 뒤에 붙은 I·V 묶음만 숫자로 바꾼다(AI 같은 말은 건드리지 않는다). */
+const ROMAN_ASCII={'I':'1','II':'2','III':'3','IV':'4','V':'5'};
+const deRoman=t=>(t||'').replace(/[ⅠⅡⅢⅣⅤ]/g,c=>ROMAN[c])
+                        .replace(/([가-힣])\s*(III|IV|II|I|V)(?![A-Za-z])/g,
+                                 (m,k,r)=>k+ROMAN_ASCII[r.toUpperCase()]);
+const normSubj=t=>deRoman(t).replace(/[\s ·ㆍ‧,\.\(\)\[\]]/g,'');
 /* 앞부분만 같다고 같은 과목으로 보면 안 된다.
    '문학'과 '문학과영상', '중국어'와 '중국어회화'는 다른 과목이다.
    끝의 번호 유무만 다른 경우('미적분'과 '미적분Ⅰ')에만 같게 본다.
