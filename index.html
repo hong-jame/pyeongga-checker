@@ -1512,6 +1512,94 @@ const RULES=[
    if(checked+circles===0&&boxes>0)
      return {st:'fail',msg:`선택 표시가 없는 빈 체크박스만 ${boxes}개 있습니다`};
    return {st:'pass',msg:`평가 방법 선택 표시 ${checked+circles}개`};
+ }},
+
+{id:'dupperf',name:'수행평가 영역끼리 같은 문구 (복사 흔적)',level:'warn',
+ run(s){
+   /* 영역이 다르면 채점기준과 성취수준 진술도 달라야 한다.
+      한 영역을 만들어 놓고 다음 영역에 그대로 붙여 넣은 흔적을 찾는다.
+      2026-08-14 실제 접수분에서 확인 — 영어 회화는 두 영역의 상·중·하 진술 세 줄이 통째로 같았다.
+
+      반복이 당연한 문구는 뺀다. 이걸 안 빼면 전 과목이 걸린다.
+        · 장기 미인정 결석자 / 백지 / 자발적 미참여  → 영역마다 붙는 표준 행
+        · AI 활용 안내                              → 학교 공통 문구
+        · 기본점수 행, '제시한 과제를 수행하지 못함' 같은 최하 수준 상투 문구 */
+   const SKIP=[
+     /장기\s*미인정|백지|자발적\s*미참여|미응시/,
+     // AI 활용 안내는 학교 공통 문구라 영역마다 똑같이 붙는 것이 정상이다
+     /AI\s*(입력창|활용|생성물|는|２)|개인정보를?\s*입력|활용\s*과정을?\s*표기|전자기기|인터넷\s*사용|부정행위|출처\s*표기/,
+     /기본\s*점수|평가\s*요소.{0,12}(모두|전부)\s*만족|위\s*평가\s*요소/,
+     /^제시한?\s*과제를\s*수행하지\s*못/,
+     // 성취기준은 한 개를 두 과제로 나눠 평가할 수 있어 영역에 겹쳐도 정상이다
+     /^[∙·•\s]*\[?\d{2}[가-힣ⅠⅡⅢⅣⅤI\s]{1,8}-?\d{1,2}-\d{2}\]?/,
+     /^[가-힣]{0,3}\s*평가\s*(요소|방법|기준)$/,
+   ];
+   const tabs=[];
+   for(const b of s.blocks){
+     if(b.type!=='tbl') continue;
+     const head=(b.tbl.filled[0]||[]).map(c=>(c||'').replace(/\s/g,''));
+     const ai=head.indexOf('평가영역명');
+     const isDetail = ai>=0 || (head.some(h=>h.includes('배점')) && b.tbl.nr>=3);
+     if(!isDetail) continue;
+     const row=(b.tbl.filled[0]||[]).map(c=>(c||'').replace(/\s+/g,' ').trim());
+     let nm='';
+     if(ai>=0) for(let k=ai+1;k<row.length;k++){ if(row[k]&&head[k]!=='평가영역명'){nm=row[k];break;} }
+     const texts=new Set();
+     for(const c of b.tbl.cells)
+       for(const line of String(c.text).split('\n')){
+         const v=line.replace(/\s+/g,' ').trim();
+         if(v.length<15) continue;
+         if(SKIP.some(re=>re.test(v))) continue;
+         texts.add(v);
+       }
+     /* 1·2학년(2022 개정)은 채점기준 대신 '성취기준별 성취수준' 서술을 쓴다.
+        그 서술은 성취기준에서 나오므로, 두 영역이 같은 성취기준을 평가하면
+        문구가 같은 것이 오히려 정상이다.
+        실제로 체육1은 탁구 서비스 / 스트로크 / 경기 규칙 세 영역이 모두 [12체1-02] 하나였다.
+        반대로 물리학실험은 세 영역이 [12물실02-07] [03-03] [05-01] 로 다른데 문구가 같았다 — 이건 진짜다.
+        그래서 영역의 성취기준이 겹치면 넘어가고, 겹치지 않을 때만 알린다. */
+     const all=b.tbl.cells.map(c=>c.text).join(' ');
+     const codes=new Set((all.match(/\[?\d{2}[가-힣ⅠⅡⅢⅣⅤ\s]{1,6}-?\d{1,2}-\d{2}\]?/g)||[])
+                         .map(x=>x.replace(/[\[\]\s]/g,'')));
+     tabs.push({name:nm||`영역 ${tabs.length+1}`, texts, codes});
+   }
+   if(tabs.length<2)
+     return {st:'skip',msg:'수행평가 세부기준 표가 둘 이상일 때만 봅니다'};
+
+   // 성취기준이 겹치지 않는 두 영역인가 (코드를 못 읽었으면 판단할 수 없으니 알린다)
+   const conflict=(i,j)=>{
+     const A=tabs[i].codes, B=tabs[j].codes;
+     if(A.size && B.size) return ![...A].some(c=>B.has(c));
+     return true;
+   };
+   const where={};
+   tabs.forEach((t,i)=>t.texts.forEach(v=>{ (where[v]=where[v]||[]).push(i); }));
+   const dup=[];
+   for(const [v,raw] of Object.entries(where)){
+     const ix=[...new Set(raw)];
+     if(ix.length<2) continue;
+     let hit=false, sure=false;
+     for(let a=0;a<ix.length;a++) for(let b2=a+1;b2<ix.length;b2++){
+       if(!conflict(ix[a],ix[b2])) continue;
+       hit=true;
+       if(tabs[ix[a]].codes.size && tabs[ix[b2]].codes.size) sure=true;   // 성취기준이 확실히 다르다
+     }
+     if(hit) dup.push({v, sure, areas:ix.map(i=>tabs[i].name)});
+   }
+   dup.sort((a,b)=>(b.sure-a.sure)||(b.v.length-a.v.length));
+   if(!dup.length)
+     return {st:'pass',msg:`세부기준 ${tabs.length}개 영역에 겹치는 문구가 없습니다`};
+
+   const nSure=dup.filter(d=>d.sure).length, nUn=dup.length-nSure;
+   const det=dup.slice(0,6).map(d=>
+     `${d.sure?'◆':'◇'} ${d.areas.join(' ↔ ')}\n   "${d.v.slice(0,90)}"`).join('\n')
+     + '\n\n◆ 성취기준이 서로 다른 영역인데 문구가 같습니다'
+     + (nUn?'\n◇ 표에서 성취기준을 못 읽어 확인이 필요합니다 (같은 성취기준이면 정상일 수 있습니다)':'');
+   const msg = nSure
+     ? `성취기준이 다른 영역에 똑같은 문구가 ${nSure}곳 있습니다`
+       + (nUn?` (확인 필요 ${nUn}곳 별도)`:'')
+     : `서로 다른 영역에 똑같은 문구가 ${nUn}곳 있습니다. 같은 성취기준을 나눠 평가한 것인지 확인해 주세요`;
+   return {st:'fail', msg, det};
  }}
 ];
 const round=n=>Math.round(n*100)/100;
@@ -1879,6 +1967,7 @@ const ANCHORS={
   codemix:['성취기준'],
   termmatch:['학기','평가영역명','수행평가 세부'],
   scoresum:['배점','채점 기준','영역 만점','영역만점'],
+  dupperf:['수행평가 세부','평가영역명','채점 기준','채점기준'],
   guide:[]     // 자리를 특정할 수 없어 문서 맨 앞
 };
 
