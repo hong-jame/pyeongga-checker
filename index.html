@@ -1178,15 +1178,29 @@ const RULES=[
    if(!ts.length) return isRubricless(s)
      ? {st:'skip',msg:'채점기준을 성취기준별 성취수준(A~E)으로 제시하는 양식이라 급간 검산 대상이 아닙니다'}
      : {st:'unknown',msg:'채점기준표(배점 열)를 찾지 못했습니다'};
+   /* 평가요소 칸이 2단인 표가 있다. 왼쪽은 큰 묶음, 오른쪽이 실제 채점 항목이다.
+        문학의 시선, 비판적 읽기 │ 선정 이유 및 정보 조직  5 3 1
+                                │ 삶의 문제 및 작가 관점  6 4 2
+                                │ 형식 및 표현상 특징     6 4 2
+                                │ 비판적 견해             8 6 4
+      배점을 통째로 모아 중복을 지우고 정렬하면 8,6,5,4,3,2,1 이 되어
+      급간이 2,1,1,1,1,1 로 보인다 — 실제로는 항목마다 전부 급간 2다.
+      (2026-08-18 3학년 심화국어에서 이 오탐이 실제로 회신까지 나갔다)
+      collectRubricTables 가 내림차순이 끊기는 곳에서 나눠 둔 runs 가 곧 채점 항목이므로
+      급간은 묶음별로 따로 본다. */
    const det=[],bad=[];
    for(const tb of ts) for(const g of tb.groups){
-     const v=[...new Set(g.scores)].sort((a,b)=>b-a);
      const nm=g.name.slice(0,26);
-     if(v.length<3){ det.push(`${nm} : ${v.join(', ')}점 (단계가 적어 급간 판정 생략)`); continue; }
-     const d=[]; for(let i=0;i+1<v.length;i++) d.push(round(v[i]-v[i+1]));
-     det.push(`${nm} : ${v.join(', ')}점 → 급간 ${d.join(', ')}`);
-     if(!d.every(x=>Math.abs(x-d[0])<0.001)) bad.push(`${nm} — 급간이 일정하지 않습니다 (${d.join(', ')})`);
-     else if(Math.abs(d[0]-Math.round(d[0]))>0.001) bad.push(`${nm} — 급간이 정수가 아닙니다 (${d[0]})`);
+     const runs=(g.runs&&g.runs.length)?g.runs:[g.scores];
+     runs.forEach((run,ri)=>{
+       const label=nm+(runs.length>1?` (${ri+1}번째 채점 항목)`:'');
+       const v=[...new Set(run)].sort((a,b)=>b-a);
+       if(v.length<3){ det.push(`${label} : ${v.join(', ')}점 (단계가 적어 급간 판정 생략)`); return; }
+       const d=[]; for(let i=0;i+1<v.length;i++) d.push(round(v[i]-v[i+1]));
+       det.push(`${label} : ${v.join(', ')}점 → 급간 ${d.join(', ')}`);
+       if(!d.every(x=>Math.abs(x-d[0])<0.001)) bad.push(`${label} — 급간이 일정하지 않습니다 (${d.join(', ')})`);
+       else if(Math.abs(d[0]-Math.round(d[0]))>0.001) bad.push(`${label} — 급간이 정수가 아닙니다 (${d[0]})`);
+     });
    }
    if(!det.length) return {st:'unknown',msg:'배점을 읽지 못했습니다'};
    if(!bad.length) return {st:'pass',msg:'채점 배점의 급간이 모두 일정하고 정수입니다',det:det.join('\n')};
