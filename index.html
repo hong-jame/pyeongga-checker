@@ -1202,6 +1202,32 @@ const RULES=[
            msg:`성취기준을 범위로 적은 곳이 ${[...new Set(hits)].length}곳 있습니다. 평가하는 성취기준을 모두 적어 주세요`,
            det:[...new Set(hits)].join('\n')};
  }},
+{id:'year',name:'제목의 학년도',level:'error',
+ run(s){
+   /* 지난 해 계획서를 복사하면 제목만 그대로 남는다.
+      2026-08-19 1학년 체육2가 '2025학년도 2학기 …' 였는데 어느 규칙도 못 짚었다.
+      기준 연도는 학사일정 json 의 학년도, 없으면 오늘 날짜로 잡는다(3월부터 그 해 학년도). */
+   const now = new Date();
+   const base = +((CAL && CAL.학년도) ||
+                  (now.getMonth() >= 2 ? now.getFullYear() : now.getFullYear() - 1));
+   const cands = [];
+   for(const b of s.blocks){
+     const t = b.type === 'p' ? b.text : (b.tbl && b.tbl.nr <= 3 ? b.tbl.all : '');
+     if(!t) continue;
+     const one = String(t).replace(/\s+/g, ' ').trim();
+     if(one.length > 120) continue;
+     // 제목 줄만 본다. 본문의 '2025학년도 평가계획을 참고' 같은 안내 문구는 걸리지 않는다
+     if(!/교수\s*[·ㆍ‧∙･\.]?\s*학습|평가\s*운영\s*계획|평가\s*계획서/.test(one)) continue;
+     const m = one.match(/(\d{4})\s*학년도/);
+     if(m) cands.push({y: +m[1], t: one.slice(0, 70)});
+   }
+   if(!cands.length) return {st:'unknown', msg:'제목에서 학년도를 읽지 못했습니다'};
+   const bad = cands.filter(c => c.y !== base);
+   if(!bad.length) return {st:'pass', msg:`제목이 ${base}학년도입니다`};
+   return {st:'fail',
+           msg:`제목의 학년도가 ${bad[0].y}학년도입니다. ${base}학년도여야 합니다`,
+           det:[...new Set(bad.map(c => c.t))].join('\n')};
+ }},
 {id:'cross',name:'범교과 학습 주제 시수 (최소 기준)',level:'warn',
  run(s){
    if(!CROSS_PLAN) return {st:'skip',msg:'범교과 시수 배분표(xlsx)를 넣으면 점검합니다'};
@@ -2114,6 +2140,7 @@ function openAll(v){ document.querySelectorAll('.subj').forEach(e=>e.classList.t
 /* '없습니다' 류의 지적은 그 낱말이 문서에 없어서 못 찾는다.
    그래서 같은 절에 반드시 있는 문구를 뒤에 예비로 붙여 둔다. */
 const ANCHORS={
+  year:['학년도','학교명','과목'],
   term:['반영비율','평가 종류'],
   ratio100:['반영비율'],
   sumin:['반영비율'],
@@ -2177,7 +2204,7 @@ function exportReply(){
          자리 없이는 못 고치는 규칙만 짧은 상세를 세 줄까지 덧붙인다.
          긴 메시지와 상세는 지시서에 그대로 남겨 연구부가 화면에서 본다. */
       const 수량=(r.msg.match(/\d+\s*(?:곳|건|개|종|과목|영역)/)||[])[0]||'';
-      const 자리필요=['scoresum','areasum','perfarea','perfscore','edutech','examdate',
+      const 자리필요=['scoresum','areasum','perfarea','perfscore','edutech','examdate','year',
                       'perftime','codes','codemix','dupperf','levelstate','subarea',
                       'cutscore','basepct','grade5','coderange','elevel','levelmatch'];
       /* 자리를 알려 줘야 고칠 수 있는 규칙은 메시지를 첫 줄로 넣고 상세를 세 줄까지 붙인다.
