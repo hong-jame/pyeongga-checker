@@ -1229,6 +1229,34 @@ const RULES=[
            msg:`제목의 학년도가 ${bad[0].y}학년도입니다. ${base}학년도여야 합니다`,
            det:[...new Set(bad.map(c => c.t))].join('\n')};
  }},
+{id:'section',name:'양식의 절이 다 있는지',level:'error',
+ run(s){
+   /* 절이 통째로 빠져도 다른 규칙은 '해당 없음' 으로 조용히 넘어간다.
+      2026-08-19: 1학년 음악에 11번(디지털기반 활용 수업 계획)이 없었는데 아무도 못 짚었다.
+      절 제목 표는 칸 수가 제각각이고 제목 사이에 메모가 끼어 글자가 갈라지므로
+      표 모양이 아니라 본문에 그 절의 표지 낱말이 있는지로 본다. */
+   const 절=[
+     [1,'평가의 목적',/평가의?목적/],
+     [2,'평가의 기본 방향과 방침',/기본방향/],
+     [3,'성취기준 및 성취수준',/성취기준및(성취수준|평가기준)/],
+     [4,'평가의 종류와 반영 비율',/평가의?(종류|유형)와반영비율/],
+     [5,'기준성취율과 성취도',/기준성취율/],
+     [6,'수행평가 세부기준',/수행평가(영역별)?세부기준/],
+     [7,'정의적 능력 평가',/정의적능력/],
+     [8,'수행평가 미응시자(결시자) 성적 처리',/미응시자|결시자/],
+     [9,'평가 유의사항',/유의사항/],
+     [10,'평가 결과 분석 및 활용',/평가결과(의)?(분석|활용)/],
+     [11,'디지털기반(에듀테크) 활용 수업 계획',/디지털기반|에듀테크.{0,10}활용수업계획/],
+   ];
+   const t=String(s.text||'').replace(/\s/g,'');
+   if(t.length<2000) return {st:'unknown',msg:'본문을 충분히 읽지 못해 절을 세지 못했습니다'};
+   const 없=절.filter(([,,re])=>!re.test(t));
+   const det=절.map(([n,nm,re])=>`${re.test(t)?'○':'×'} ${n}. ${nm}`).join('\n');
+   if(!없.length) return {st:'pass',msg:`양식의 11개 절이 모두 있습니다`,det};
+   return {st:'fail',
+           msg:`양식에 있어야 할 절이 빠졌습니다 — ${없.map(([n,nm])=>n+'번 '+nm).join(', ')}`,
+           det};
+ }},
 {id:'cross',name:'범교과 학습 주제 시수 (최소 기준)',level:'warn',
  run(s){
    if(!CROSS_PLAN) return {st:'skip',msg:'범교과 시수 배분표(xlsx)를 넣으면 점검합니다'};
@@ -2141,6 +2169,7 @@ function openAll(v){ document.querySelectorAll('.subj').forEach(e=>e.classList.t
 /* '없습니다' 류의 지적은 그 낱말이 문서에 없어서 못 찾는다.
    그래서 같은 절에 반드시 있는 문구를 뒤에 예비로 붙여 둔다. */
 const ANCHORS={
+  section:['평가 결과','유의 사항','평가 유의'],
   year:['학년도','학교명','과목'],
   term:['반영비율','평가 종류'],
   ratio100:['반영비율'],
@@ -2205,7 +2234,7 @@ function exportReply(){
          자리 없이는 못 고치는 규칙만 짧은 상세를 세 줄까지 덧붙인다.
          긴 메시지와 상세는 지시서에 그대로 남겨 연구부가 화면에서 본다. */
       const 수량=(r.msg.match(/\d+\s*(?:곳|건|개|종|과목|영역)/)||[])[0]||'';
-      const 자리필요=['scoresum','areasum','perfarea','perfscore','edutech','examdate','year',
+      const 자리필요=['scoresum','areasum','perfarea','perfscore','edutech','examdate','year','section',
                       'perftime','codes','codemix','dupperf','levelstate','subarea',
                       'cutscore','basepct','grade5','coderange','elevel','levelmatch'];
       /* 자리를 알려 줘야 고칠 수 있는 규칙은 메시지를 첫 줄로 넣고 상세를 세 줄까지 붙인다.
