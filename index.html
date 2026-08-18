@@ -1058,13 +1058,19 @@ const RULES=[
    const onlyPlan=[...planCodes].filter(c=>!evalCodes.has(c));
    const onlyEval=[...evalCodes].filter(c=>!planCodes.has(c));
    const det=[`운영계획 ${planCodes.size}개 / 평가계획 ${evalCodes.size}개`];
-   if(onlyEval.length) det.push('평가에만 있음: '+onlyEval.join(', '));
-   if(onlyPlan.length) det.push('운영계획에만 있음: '+onlyPlan.join(', '));
+   // 대조는 한 방향으로만 한다. 평가계획은 운영계획의 성취기준 중 일부를 골라 담는 것이라
+   //   운영계획에만 있고 평가계획에 없는 성취기준은 정상이다. 지적으로 내보내지 않는다 (2026-08-18).
+   //   반대로 평가계획에만 있는 코드는 운영계획에 없는 것을 평가하겠다는 뜻이라 확인이 필요하다.
+   if(onlyEval.length) det.push('평가계획에만 있음: '+onlyEval.join(', '));
+   if(onlyPlan.length&&evalCodes.size)
+     det.push(`운영계획에만 있는 성취기준 ${onlyPlan.length}개는 평가에 담지 않은 것이라 정상입니다.`);
    if(!evalCodes.size)
-     return {st:'unknown',msg:'반영비율 표에서 성취기준 코드를 읽지 못했습니다',det:det.join('\n')};
+     return {st:'unknown',
+             msg:`반영비율 표에서 성취기준 코드를 읽지 못했습니다 (운영계획 표에는 ${planCodes.size}개 있습니다)`,
+             det:det.join('\n')};
    if(onlyEval.length)
      return {st:'fail',msg:`평가계획에만 있고 교수학습 운영계획에 없는 성취기준 ${onlyEval.length}개`,det:det.join('\n')};
-   return {st:'pass',msg:`평가계획 성취기준이 모두 운영계획에 있습니다 (${evalCodes.size}개)`,det:det.join('\n')};
+   return {st:'pass',msg:`평가계획 성취기준이 모두 운영계획 안에 있습니다 (${evalCodes.size}개)`,det:det.join('\n')};
  }},
 
 {id:'cross',name:'범교과 학습 주제 시수 (최소 기준)',level:'warn',
