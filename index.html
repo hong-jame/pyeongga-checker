@@ -976,7 +976,8 @@ const RULES=[
 
 {id:'semlevel',name:'학기 단위 성취수준 (1·2학년)',level:'error',
  run(s){
-   if(!/1학년|2학년/.test(s.meta.grade||'')) return {st:'skip',msg:'2015 개정 적용 학년은 해당하지 않습니다'};
+   // 학년 칸은 '2학년' 도 있고 그냥 '2' 도 있다. gradeOf 가 맞춰 준다 (2026-08-19).
+   if(!/1학년|2학년/.test(gradeOf(s))) return {st:'skip',msg:'2015 개정 적용 학년은 해당하지 않습니다'};
    // 문서마다 '성취수준'과 '성취 수준' 을 섞어 쓴다. 띄어쓰기를 허용하지 않으면
    //   실제로 표가 있는데도 없다고 잡는다 (2026-08-18 통합과학2).
    if(/학기\s*단위\s*성취\s*수준/.test(s.text)) return {st:'pass',msg:'학기 단위 성취수준 진술이 있습니다'};
@@ -1232,7 +1233,7 @@ const RULES=[
  run(s){
    if(!CROSS_PLAN) return {st:'skip',msg:'범교과 시수 배분표(xlsx)를 넣으면 점검합니다'};
    const term=crossTerm(s);
-   const grade=(s.meta.grade||'').replace(/\s/g,'');
+   const grade=gradeOf(s).replace(/\s/g,'');
    const req=CROSS_PLAN.filter(e=>{
      const t=(e.target||'').replace(/\s/g,'');
      const gradeOK=/전학년|전체/.test(t)||!t||(grade&&t.includes(grade.replace('학년','')+'학년'));
@@ -1486,7 +1487,7 @@ const RULES=[
 
 {id:'minlevelx',name:'선택과목에 최소 성취수준 진술 (넣지 않음)',level:'warn',
  run(s){
-   if(/3\s*학년/.test(s.meta.grade||'')) return {st:'skip',msg:'2015 개정 적용 학년은 해당하지 않습니다'};
+   if(/3\s*학년/.test(gradeOf(s))) return {st:'skip',msg:'2015 개정 적용 학년은 해당하지 않습니다'};
    const nm=norm(s.meta.name);
    if(COMMON.some(c=>norm(c)===nm||nm.startsWith(norm(c))))
      return {st:'skip',msg:'공통과목은 최소 성취수준을 작성합니다'};
@@ -1663,7 +1664,7 @@ const RULES=[
 
 {id:'elevel',name:'최저 성취도 구간 (공통 40%~60% · 선택 60% 미만)',level:'error',
  run(s){
-   if(/3\s*학년/.test(s.meta.grade||'')) return {st:'skip',msg:'2015 개정 적용 학년은 해당하지 않습니다'};
+   if(/3\s*학년/.test(gradeOf(s))) return {st:'skip',msg:'2015 개정 적용 학년은 해당하지 않습니다'};
    const t=s.text.replace(/\s/g,'');
    const has40=/40%이상~60%미만[A-E]/.test(t);
    const has60=/(^|[^~])60%미만[A-E]/.test(t);
