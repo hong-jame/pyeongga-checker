@@ -1151,6 +1151,29 @@ const RULES=[
    return {st:'fail',msg:`에듀테크 활용 시수 기재를 확인해 주세요 ${uniq.length}건`,
            det:uniq.join('\n')+'\n\n'+det.join('\n')};
  }},
+{id:'coderange',name:'성취기준을 범위(~)로 적지 않기',level:'error',
+ run(s){
+   /* 반영비율 표의 성취기준 칸에 [12정법01-01]~[12정법06-03] 처럼 처음과 끝만 적는 경우가 있다.
+      실제로 평가하는 성취기준을 모두 적어야 한다 (2026-08-18 정치와 법). */
+   const R=s.ratio;
+   const RANGE=/\]\s*[~∼〜]\s*\[/;
+   const hits=[];
+   if(R&&R.ok&&R.stdCells){
+     for(const c of R.stdCells){
+       const t=String(c.text||'').replace(/\s+/g,' ').trim();
+       if(RANGE.test(t)) hits.push(t.slice(0,60));
+     }
+   }
+   if(!hits.length){
+     // 반영비율 표를 못 읽었을 때를 대비해 본문에서도 한 번 본다
+     const m=String(s.text||'').replace(/\s+/g,' ').match(/\[\s*\d{2}[^\]]{3,18}\]\s*[~∼〜]\s*\[\s*\d{2}[^\]]{3,18}\]/g);
+     if(m) hits.push(...[...new Set(m)].slice(0,5));
+   }
+   if(!hits.length) return {st:'pass',msg:'성취기준을 범위로 줄여 적은 곳이 없습니다'};
+   return {st:'fail',
+           msg:`성취기준을 범위로 적은 곳이 ${[...new Set(hits)].length}곳 있습니다. 평가하는 성취기준을 모두 적어 주세요`,
+           det:[...new Set(hits)].join('\n')};
+ }},
 {id:'cross',name:'범교과 학습 주제 시수 (최소 기준)',level:'warn',
  run(s){
    if(!CROSS_PLAN) return {st:'skip',msg:'범교과 시수 배분표(xlsx)를 넣으면 점검합니다'};
@@ -1393,7 +1416,9 @@ const RULES=[
    const clash=[];
    for(const u of su) for(const e of exams){
      const diff=Math.round((e.d-u.t.d)/DAY);
-     if(diff>=0&&diff<21)
+     // 기준은 '정기고사 1~2주 전 지양' 이다. 예전에는 21일(3주)까지 잡아 너무 빡빡했다.
+     //   2026-08-18: 14일 안쪽만 알린다 (통합과학2 9월 4~5주 → 10/12 는 15일이라 정상).
+     if(diff>=0&&diff<14)
        clash.push(`수행평가 ${u.raw} → 정기고사 ${e.lab} 까지 ${Math.floor(diff/7)}주`);
    }
    const det=[`기준: ${src}`,
@@ -1645,14 +1670,36 @@ const RULES=[
      const row=(b.tbl.filled[0]||[]).map(c=>(c||'').replace(/\s+/g,' ').trim());
      let nm='';
      if(ai>=0) for(let k=ai+1;k<row.length;k++){ if(row[k]&&head[k]!=='평가영역명'){nm=row[k];break;} }
+     /* 채점 항목마다 맨 아래 등급(최하점) 진술은 '…하지 못한 경우' 같은 상투 문구라
+        영역이 달라도 같은 것이 정상이다 (2026-08-18 통합과학2).
+        배점 열을 읽어 점수가 다시 올라가는 곳에서 묶음을 끊고, 묶음마다 최저점 행을 빼 둔다. */
+     const scored=[];
+     for(let ri=0;ri<b.tbl.nr;ri++){
+       const cells2=(b.tbl.filled[ri]||[]).map(x=>String(x||'').replace(/\s/g,''));
+       let sc=null;
+       for(const cell of cells2){ const mm=cell.match(/^(\d+(?:\.\d+)?)점?$/); if(mm) sc=+mm[1]; }
+       if(sc!==null) scored.push({r:ri,sc});
+     }
+     const lowRows=new Set();
+     let run=[];
+     const flushRun=()=>{
+       if(run.length){ const mn=Math.min(...run.map(x=>x.sc));
+                       run.forEach(x=>{ if(x.sc===mn) lowRows.add(x.r); }); }
+       run=[];
+     };
+     for(const x of scored){ if(run.length&&x.sc>run[run.length-1].sc) flushRun(); run.push(x); }
+     flushRun();
+
      const texts=new Set();
-     for(const c of b.tbl.cells)
+     for(const c of b.tbl.cells){
+       if(lowRows.has(c.r)) continue;
        for(const line of String(c.text).split('\n')){
          const v=line.replace(/\s+/g,' ').trim();
          if(v.length<15) continue;
          if(SKIP.some(re=>re.test(v))) continue;
          texts.add(v);
        }
+     }
      /* 1·2학년(2022 개정)은 채점기준 대신 '성취기준별 성취수준' 서술을 쓴다.
         그 서술은 성취기준에서 나오므로, 두 영역이 같은 성취기준을 평가하면
         문구가 같은 것이 오히려 정상이다.
@@ -1809,7 +1856,12 @@ const DAY=86400000;
 function timeToDate(txt,cal){
   const base=+((cal&&cal.학년도)||new Date().getFullYear());
   const t=(txt||'').replace(/\s/g,'');
-  let m=t.match(/(\d{1,2})월(\d)주/);
+  // '9월 4~5주' 처럼 범위로 적는 교사가 많다. 못 읽으면 전부 '계산 못 함' 으로 빠진다.
+  //   시험 준비기간과 겹치는지 보는 것이므로 끝 주(시험에 가까운 쪽)를 기준으로 잡는다.
+  let m=t.match(/(\d{1,2})월(\d)\s*[~∼〜–—-]\s*(\d)주/);
+  if(m){ const mo=+m[1], y=mo<=2?base+1:base, w=+m[3];
+         return {kind:'week',m:mo,w,d:weekStart(y,mo,w)}; }
+  m=t.match(/(\d{1,2})월(\d)주/);
   if(m){ const mo=+m[1], y=mo<=2?base+1:base;
          return {kind:'week',m:mo,w:+m[2],d:weekStart(y,mo,+m[2])}; }
   m=t.match(/(\d{1,2})\s*[\/.]\s*(\d{1,2})/);
@@ -2090,10 +2142,28 @@ function exportReply(){
       if(r.rule.id==='guide') continue;
                                                     // (2026-08-14 교육과정부 확인). 연구부 화면에서만 본다
       if(r.st!=='fail' && r.st!=='unknown') continue;
+      const 수준=(r.st==='unknown') ? '확인' : (r.rule.level==='error' ? '수정' : '검토');
+      /* 메모에 들어갈 문구는 짧게 만든다 (2026-08-18).
+         전에는 규칙명 + 메시지 + 상세 여섯 줄을 다 넣어 한 메모가 열 줄을 넘었다.
+         메모에는 '[수정] 평가 용어 (지필평가 → 정기시험) — 1곳' 한 줄만 넣고,
+         자리 없이는 못 고치는 규칙만 짧은 상세를 세 줄까지 덧붙인다.
+         긴 메시지와 상세는 지시서에 그대로 남겨 연구부가 화면에서 본다. */
+      const 수량=(r.msg.match(/\d+\s*(?:곳|건|개|종|과목|영역)/)||[])[0]||'';
+      const 요약=`[${수준}] ${r.rule.name}`+(수량?` — ${수량}`:'');
+      const 자리필요=['scoresum','areasum','perfarea','perfscore','edutech','examdate',
+                      'perftime','codes','codemix','dupperf','levelstate','subarea',
+                      'cutscore','basepct','grade5','coderange','elevel','levelmatch'];
+      const 메모상세=자리필요.includes(r.rule.id)
+        ? (r.det||'').split('\n').map(x=>x.trim())
+            .filter(x=>x&&x.length<=70&&!/^…|…$/.test(x)
+                      &&!/^(기준|정기고사|수행평가|지난 학기)\s*:/.test(x)).slice(0,3)
+        : [];
       지적.push({
         id:r.rule.id,
         규칙:r.rule.name,
-        수준:(r.st==='unknown') ? '확인' : (r.rule.level==='error' ? '수정' : '검토'),
+        수준,
+        요약,
+        메모상세,
         메시지:r.msg,
         상세:(r.det||'').split('\n').slice(0,8).join('\n'),
         앵커:ANCHORS[r.rule.id]||[]
