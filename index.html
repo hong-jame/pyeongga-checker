@@ -1333,6 +1333,59 @@ const RULES=[
    return {st:'fail',
            msg:`달마다 수업일수가 다른데 전체 수업 시수가 ${분모[0]}시수로 모두 같습니다. 실제로 세어 적어 주세요`,det};
  }},
+{id:'weekgap',name:'진도표에 빠진 주',level:'error',
+ run(s){
+   /* 3학년 기하 10월은 3~5주만 있고 1·2주 계획이 통째로 없었다 (2026-08-19).
+      월 칸은 병합돼 있고, 비어 있는 표도 있고, 12월과 1월을 한 표에 쓴 파일도 있다.
+      그래서 행마다 달을 따라가며 주를 모은다.
+      8월(개학 주가 제각각)과 1월(방학), 5주(달마다 있기도 없기도)는 판단하지 않는다. */
+   const 주모음={};
+   for(const b of s.blocks){
+     if(b.type!=='tbl') continue;
+     const g=b.tbl.filled||[];
+     if(!g.length) continue;
+     const 머리=(g[0]||[]).map(x=>String(x||''));
+     const 한줄=머리.join(' ');
+     if(!/단원명|성취기준/.test(한줄)||/평가기준|성취수준/.test(한줄)) continue;
+     const mi=머리.findIndex(c=>c.replace(/\s/g,'')==='월');
+     const wi=머리.findIndex(c=>c.replace(/\s/g,'')==='주');
+     if(mi<0||wi<0) continue;
+     // 표가 스스로 밝히는 달 — 맨 아래 '○월 에듀테크 활용 수업 시수' 행
+     let 표달=null;
+     for(const row of g){
+       for(const c of (row||[])){
+         const m=String(c||'').replace(/[０-９]/g,x=>String.fromCharCode(x.charCodeAt(0)-0xFEE0))
+                        .replace(/\s/g,'').match(/(\d{1,2})월에듀테크활용(?:수업)?시수/);
+         if(m){ 표달=+m[1]; break; }
+       }
+       if(표달) break;
+     }
+     // 전각 숫자(２３４)를 쓴 파일이 있다 (일본어Ⅱ 12월). JS 의 \d 는 전각을 안 잡는다
+     const 반각=t=>String(t||'').replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));
+     let 현재=표달;
+     for(let r=1;r<g.length;r++){
+       const row=g[r]||[];
+       const mm=반각(row[mi]).trim().match(/^(\d{1,2})$/);
+       if(mm&&+mm[1]>=1&&+mm[1]<=12) 현재=+mm[1];
+       const ww=반각(row[wi]).trim().match(/^(\d{1,2})\s*(?:[~\-–—∼]\s*(\d{1,2}))?$/);
+       if(!ww||!현재) continue;
+       const a=+ww[1], z=ww[2]?+ww[2]:+ww[1];
+       if(a<1||z>6||a>z) continue;
+       (주모음[현재]=주모음[현재]||new Set());
+       for(let w=a;w<=z;w++) 주모음[현재].add(w);
+     }
+   }
+   const 달들=[9,10,11,12].filter(m=>주모음[m]&&주모음[m].size);
+   if(달들.length<3) return {st:'unknown',msg:'진도표의 월·주를 충분히 읽지 못했습니다'};
+   const 빠짐=[];
+   for(const m of 달들){
+     const 없=[1,2,3,4].filter(w=>!주모음[m].has(w));
+     if(없.length) 빠짐.push(`${m}월 ${없.map(w=>w+'주').join('·')}`);
+   }
+   const det=[9,10,11,12].map(m=>`${m}월 : ${주모음[m]?[...주모음[m]].sort((a,b)=>a-b).join(', ')+'주':'(없음)'}`).join('\n');
+   if(!빠짐.length) return {st:'pass',msg:'9~12월 진도 계획에 빠진 주가 없습니다',det};
+   return {st:'fail',msg:`진도 계획이 없는 주가 있습니다 — ${빠짐.join(', ')}`,det};
+ }},
 {id:'cross',name:'범교과 학습 주제 시수 (최소 기준)',level:'warn',
  run(s){
    if(!CROSS_PLAN) return {st:'skip',msg:'범교과 시수 배분표(xlsx)를 넣으면 점검합니다'};
@@ -2245,6 +2298,7 @@ function openAll(v){ document.querySelectorAll('.subj').forEach(e=>e.classList.t
 /* '없습니다' 류의 지적은 그 낱말이 문서에 없어서 못 찾는다.
    그래서 같은 절에 반드시 있는 문구를 뒤에 예비로 붙여 둔다. */
 const ANCHORS={
+  weekgap:['단원명','월','주'],
   coderange:['교육과정 성취기준','성취기준','반영비율'],
   edutech:['에듀테크','활용 수업 시수','수업 시수'],
   examround:['정기시험','정기고사','평가 종류'],
@@ -2316,7 +2370,7 @@ function exportReply(){
          긴 메시지와 상세는 지시서에 그대로 남겨 연구부가 화면에서 본다. */
       const 수량=(r.msg.match(/\d+\s*(?:곳|건|개|종|과목|영역)/)||[])[0]||'';
       const 자리필요=['scoresum','areasum','perfarea','perfscore','edutech','examdate','year','section','policy',
-                      'examround','edufix','coderange',
+                      'examround','edufix','coderange','weekgap',
                       // 요약만으로는 무엇이 문제인지 모르는 것들 (2026-08-19 회신본을 열어 보고 넣음)
                       'ai','termmatch','essaymin','essay','semlevel','rubric','taskform','time',
                       'perftime','codes','codemix','dupperf','levelstate','subarea',
