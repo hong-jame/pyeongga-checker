@@ -1377,14 +1377,20 @@ const RULES=[
    }
    const 달들=[9,10,11,12].filter(m=>주모음[m]&&주모음[m].size);
    if(달들.length<3) return {st:'unknown',msg:'진도표의 월·주를 충분히 읽지 못했습니다'};
-   const 빠짐=[];
+   /* 문제 없는 달까지 늘어놓으면 그 달들도 지적으로 읽힌다 (2026-08-19).
+      빠진 달만, 그 달에 적혀 있는 주와 함께 보여 준다. */
+   const 빠짐=[], 줄=[];
    for(const m of 달들){
      const 없=[1,2,3,4].filter(w=>!주모음[m].has(w));
-     if(없.length) 빠짐.push(`${m}월 ${없.map(w=>w+'주').join('·')}`);
+     if(!없.length) continue;
+     빠짐.push(`${m}월 ${없.map(w=>w+'주').join('·')}`);
+     const 적힘=[...주모음[m]].sort((a,b)=>a-b).join(', ');
+     줄.push(`${m}월에 적혀 있는 주 : ${적힘}주`);
    }
-   const det=[9,10,11,12].map(m=>`${m}월 : ${주모음[m]?[...주모음[m]].sort((a,b)=>a-b).join(', ')+'주':'(없음)'}`).join('\n');
-   if(!빠짐.length) return {st:'pass',msg:'9~12월 진도 계획에 빠진 주가 없습니다',det};
-   return {st:'fail',msg:`진도 계획이 없는 주가 있습니다 — ${빠짐.join(', ')}`,det};
+   if(!빠짐.length)
+     return {st:'pass',msg:'9~12월 진도 계획에 빠진 주가 없습니다',
+             det:달들.map(m=>`${m}월 : ${[...주모음[m]].sort((a,b)=>a-b).join(', ')}주`).join('\n')};
+   return {st:'fail',msg:`진도 계획이 없는 주가 있습니다 — ${빠짐.join(', ')}`,det:줄.join('\n')};
  }},
 {id:'cross',name:'범교과 학습 주제 시수 (최소 기준)',level:'warn',
  run(s){
